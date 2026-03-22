@@ -1,0 +1,116 @@
+/* ═══════════════════════════════════════════════
+   WORKFLOW ENGINE — Global Styles
+   Aesthetic: Industrial command-center / dark ops
+   ═══════════════════════════════════════════════ */
+
+:root {
+  /* Core palette */
+  --bg-deepest: #050810;
+  --bg-deep: #080c14;
+  --bg-surface: #0b1120;
+  --bg-elevated: #111827;
+  --bg-card: #0f172a;
+
+  /* Borders & lines */
+  --border-subtle: #1e293b;
+  --border-medium: #334155;
+  --border-strong: #475569;
+
+  /* Text */
+  --text-primary: #f1f5f9;
+  --text-secondary: #94a3b8;
+  --text-muted: #64748b;
+  --text-dim: #475569;
+
+  /* Accents */
+  --accent-cyan: #38bdf8;
+  --accent-cyan-muted: rgba(56, 189, 248, 0.15);
+  --accent-green: #10b981;
+  --accent-green-muted: rgba(16, 185, 129, 0.12);
+  --accent-pink: #ec4899;
+  --accent-pink-muted: rgba(236, 72, 153, 0.12);
+  --accent-amber: #f59e0b;
+  --accent-amber-muted: rgba(245, 158, 11, 0.12);
+  --accent-violet: #8b5cf6;
+  --accent-violet-muted: rgba(139, 92, 246, 0.12);
+
+  /* Typography */
+  --font-body: 'DM Sans', system-ui, sans-serif;
+  --font-mono: 'Space Mono', 'Fira Code', monospace;
+
+  /* Spacing */
+  --header-height: 64px;
+  --footer-height: 48px;
+
+  /* Transitions */
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  font-family: var(--font-body);
+  background: var(--bg-deepest);
+  color: var(--text-primary);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overflow-x: hidden;
+  min-height: 100vh;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: var(--bg-deep);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border-medium);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--border-strong);
+}
+
+/* Selection */
+::selection {
+  background: var(--accent-cyan-muted);
+  color: var(--text-primary);
+}
+
+/* Focus */
+:focus-visible {
+  outline: 2px solid var(--accent-cyan);
+  outline-offset: 2px;
+}
+
+/* Utility animations */
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}

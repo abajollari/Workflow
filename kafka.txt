@@ -1,0 +1,93 @@
+ ---
+  What is Kafka?
+
+  Kafka is a message broker — a middleman that lets one part of your app send a message, and another part receive and process it,   
+  completely independently of each other.
+
+  Think of it like a post office:
+  - Someone drops off a letter (the producer)
+  - The post office holds it in a mailbox (the topic)
+  - A mail carrier picks it up and delivers it (the consumer)
+
+  The key insight: the sender doesn't wait for the letter to be delivered. They drop it off and walk away.
+
+  ---
+  The flow in your app
+
+  Angular frontend
+        │
+        │  POST /api/weather/fetch
+        ▼
+  Express backend (producer)
+        │
+        │  publishes message → { latitude, longitude, label }
+        ▼
+  Kafka topic: "weather-requests"
+        │
+        │  consumer picks it up
+        ▼
+  Kafka consumer
+        │
+        │  waits 10s (simulated slow API)
+        │  calls Open-Meteo API
+        │  stores result
+        │
+        │  broadcasts via SSE
+        ▼
+  Angular frontend  ←── result appears instantly
+
+  ---
+  The three pieces in your code
+
+  1. Producer (kafka/producer.ts)
+
+  Drops a message onto the topic and returns immediately:
+  await producer.send({
+    topic: 'weather-requests',
+    messages: [{ value: JSON.stringify({ latitude, longitude, label }) }]
+  });
+  The Express route handler responds to Angular right away with { queued: true }. It doesn't wait for the weather result.
+
+  2. Topic (weather-requests)
+
+  A named queue inside Kafka. Messages sit here until a consumer picks them up. Kafka persists them on disk, so even if your        
+  consumer crashes and restarts, the messages aren't lost.
+
+  3. Consumer (kafka/consumer.ts)
+
+  Runs in the background continuously, listening for new messages:
+  consumer.run({
+    eachMessage: async ({ message }) => {
+      // called every time a new message arrives
+      // calls Open-Meteo, stores result, broadcasts via SSE
+    }
+  });
+
+  ---
+  Why not just call Open-Meteo directly from the Express route?
+
+  You could — but Kafka gives you:
+
+  ┌────────────────────────────────────────────────────┬────────────────────────────────────────────┐
+  │                    Direct call                     │                 Via Kafka                  │
+  ├────────────────────────────────────────────────────┼────────────────────────────────────────────┤
+  │ User waits for the API to respond                  │ User gets an instant response              │
+  ├────────────────────────────────────────────────────┼────────────────────────────────────────────┤
+  │ If the API is slow, the HTTP request times out     │ Consumer retries independently             │
+  ├────────────────────────────────────────────────────┼────────────────────────────────────────────┤
+  │ One slow request blocks others                     │ Requests are queued and processed in order │
+  ├────────────────────────────────────────────────────┼────────────────────────────────────────────┤
+  │ If the server restarts mid-request, result is lost │ Message stays in Kafka until processed     │
+  └────────────────────────────────────────────────────┴────────────────────────────────────────────┘
+
+  In your app, the 10-second delay makes this very visible — the Angular page stays responsive while Kafka handles the slow work in 
+  the background.
+
+
+  Setup up Kafka locally:
+  Create YAML file
+  From same folder as yaml:
+      docker compose down -v        # removes the volume so Kafka reinitialises cleanly
+      docker compose up -d
+      docker logs -f kafka
+      localhost:9092

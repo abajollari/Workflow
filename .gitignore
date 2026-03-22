@@ -1,0 +1,16 @@
+node_modules/
+
+# Frontend
+workflow-app/node_modules/
+workflow-app/dist/
+
+# Engine
+workflow-engine/node_modules/
+workflow-engine/dist/
+workflow-engine/data/app.db
+workflow-engine/uploads/
+workflow-engine/.env
+
+# Environment
+.env
+*.env.local

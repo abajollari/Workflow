@@ -1,0 +1,180 @@
+DocuSign Integration Guide
+==========================
+Steps performed to integrate DocuSign eSignature into the workflow-app.
+
+
+1. CREATE A DOCUSIGN DEVELOPER ACCOUNT
+---------------------------------------
+- Sign up at https://developers.docusign.com
+- Navigate to Apps and Keys in the left sidebar
+
+
+2. CREATE AN INTEGRATION KEY (APP)
+------------------------------------
+- In Apps and Keys, click "Add App and Integration Key"
+- Note your:
+    - Account ID
+    - Integration Key (Client ID)
+    - User ID (API Username, found under your profile)
+
+
+3. GENERATE AN RSA KEYPAIR
+---------------------------
+- In your app settings, scroll to Authentication > Service Integration
+- Click "Generate RSA Keypair"
+- Download the private.key file immediately — DocuSign only shows it once
+- The public key stays in DocuSign; you keep the private key
+
+
+4. GRANT OAUTH CONSENT (one-time)
+-----------------------------------
+- Before JWT auth works, you must grant consent once by visiting this URL
+  in a browser while logged into your DocuSign developer account:
+
+  https://account-d.docusign.com/oauth/auth?response_type=code&scope=signature%20impersonation&client_id=YOUR_CLIENT_ID&redirect_uri=https://example.com
+
+- Replace YOUR_CLIENT_ID with your Integration Key
+- Click "Allow Access"
+- You will be redirected to https://example.com/?code=... — this is expected, ignore it
+- Consent is now permanently granted for this integration key
+- Add example.com in docusign app settings > authentication > redirect URIs
+- ClientId is the Integration Key from step 2
+
+
+5. CREATE A TEMPLATE IN DOCUSIGN
+----------------------------------
+- In the DocuSign portal, go to Templates > New Template
+- Add your document and define:
+    - Roles: "Buyer" and "Seller"
+    - Tabs (signature fields, text fields, etc.)
+    - Text tab labels used in this app: "Agreement Party" and "Jurisdiction"
+- Save the template and copy its Template ID from the URL
+
+
+6. INSTALL DEPENDENCIES
+------------------------
+  cd backend
+  npm install docusign-esign dotenv
+  npm install --save-dev @types/docusign-esign
+
+
+7. CONFIGURE ENVIRONMENT VARIABLES
+-------------------------------------
+Create backend/.env with the following (no inline comments):
+
+  DOCUSIGN_ACCOUNT_ID=your-account-id
+  DOCUSIGN_CLIENT_ID=your-integration-key
+  DOCUSIGN_USER_ID=your-user-id
+  DOCUSIGN_TEMPLATE_ID=your-template-id
+  DOCUSIGN_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----
+  <contents of private.key>
+  -----END RSA PRIVATE KEY-----"
+
+  # Defaults to sandbox — uncomment for production:
+  # DOCUSIGN_BASE_PATH=https://na4.docusign.net/restapi
+  # DOCUSIGN_OAUTH_BASE_PATH=account.docusign.com
+
+IMPORTANT: Do not add inline comments on the same line as values (e.g. "value #comment")
+as dotenv includes the comment as part of the value.
+
+
+8. LOAD ENV VARS IN THE BACKEND
+---------------------------------
+Added the following as the first line of backend/src/index.ts:
+
+  import 'dotenv/config';
+
+
+9. BACKEND SERVICE — backend/src/services/docusign.service.ts
+---------------------------------------------------------------
+- Authenticates using JWT Grant (server-to-server, no user login popup)
+- Builds an envelope from the template with two roles: Buyer and Seller
+- Pre-fills shared text tabs: "Agreement Party" and "Jurisdiction"
+- Throws a clear error if authentication fails (no access token returned)
+
+Key function:
+  sendEnvelopeFromTemplate({ templateId, buyer, seller, agreementParty, jurisdiction, emailSubject? })
+
+
+10. BACKEND ROUTE — backend/src/routes/docusign.ts
+----------------------------------------------------
+- Registered at POST /api/docusign/send
+- Reads DOCUSIGN_TEMPLATE_ID from environment (not from request body)
+- Validates all required fields before calling the service
+- Wraps the service call in try/catch and returns DocuSign error messages
+
+Request body:
+  {
+    "buyer":           { "email": "buyer@example.com", "name": "John Doe" },
+    "seller":          { "email": "seller@example.com", "name": "Jane Smith" },
+    "agreementParty":  "Acme Corp",
+    "jurisdiction":    "State of California",
+    "emailSubject":    "Please sign the agreement"  // optional
+  }
+
+Response:
+  { "envelopeId": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" }
+
+
+11. REGISTER ROUTE — backend/src/index.ts
+------------------------------------------
+Added:
+  import docusignRouter from './routes/docusign.js';
+  app.use('/api/docusign', docusignRouter);
+
+
+12. ANGULAR FRONTEND — header.component.ts
+--------------------------------------------
+- Clicking the "DocuSign" nav item opens a popup dialog
+- Fields: Agreement Party, Jurisdiction, Buyer Name, Buyer Email, Seller Name, Seller Email
+- On submit, calls POST http://localhost:3000/api/docusign/send
+- On success, displays the returned Envelope ID
+- On error, displays the error message from the backend
+
+
+PRODUCTION CHECKLIST
+=====================
+- Switch DOCUSIGN_BASE_PATH to your account's production URL (e.g. https://na4.docusign.net/restapi)
+- Switch DOCUSIGN_OAUTH_BASE_PATH to account.docusign.com
+- Re-grant consent on the production account using account.docusign.com instead of account-d.docusign.com
+- Store the private key securely (e.g. environment secrets manager, not plain .env)
+- Add backend/.env to .gitignore
+
+
+####### Does it make sense to call DocuSign Sent API via Kafka or current architecture is correct
+======================================                                                                                                                                                                             
+● Current architecture is correct for this use case. Here's why:                                                                                                                                                                                                        
+  Why Kafka doesn't add value here                                                                                                     
+  The DocuSign send is a user-initiated, synchronous action — the user clicks Send and immediately expects feedback (success +        envelope ID, or an error). Putting Kafka in between would:                                                                        
+
+  - Delay the response (you'd have to poll or use a callback to know if it succeeded)
+  - Add complexity with no real benefit
+  - Make error handling harder (the failure happens in a consumer, not in the request)
+
+  When Kafka would make sense for DocuSign
+
+  If the trigger were automatic rather than manual — for example:
+
+  - A workflow node reaches a certain step and automatically sends a DocuSign envelope
+  - High volume (hundreds of envelopes triggered at once by bulk operations)
+  - You need guaranteed retry if DocuSign is temporarily down (dead-letter queue)
+  - DocuSign sending is one step in a longer async chain (send envelope → wait for signature → update workflow → notify team)       
+
+  In the context of your app
+
+  Since you already have a workflow engine (WorkflowEngine.ts), there's actually a future case where Kafka could make sense: if     
+  completing a workflow step automatically triggers sending an envelope. In that case you'd publish a docusign.send event from the  
+  workflow engine and a consumer handles it — fully decoupled.
+
+  But for a user clicking a button in the UI, the current direct HTTP call is the right approach.
+
+
+  WEBHOOK
+  ============
+   One thing you need to do in DocuSign Admin:                                                                                      
+   - Go to Settings → Connect → Add Configuration                                                                                   
+   - URL: https://your-domain/api/docusign/webhook                                                                                  
+   - Trigger: Envelope Completed                                                                                                  
+   - Format: JSON                                                                                                                 
+                  
+  For local dev, use https://ngrok.com to expose localhost:3000 to DocuSign.

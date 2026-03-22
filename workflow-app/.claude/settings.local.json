@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(mkdir -p c:/Users/arian/source/repos/workflow-app/backend/data)",
+      "Bash(touch c:/Users/arian/source/repos/workflow-app/backend/data/.gitkeep)",
+      "Bash(cd \"C:/Users/arian/source/repos/workflow-app\" && timeout 15 npm run backend 2>&1 | head -40)",
+      "Bash(curl -s http://localhost:3000/api/workflow/transitions | python -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(f'{len\\(d\\)} transitions'\\); [print\\(f'  {t[\\\\\"fromStepId\\\\\"]} -> {t[\\\\\"toStepId\\\\\"]} \\(cond={t[\\\\\"condition\\\\\"]}, edge={t[\\\\\"edgeType\\\\\"]}\\)'\\) for t in d]\")",
+      "Bash(pkill -f \"tsx watch\" 2>/dev/null || true\nsleep 2\nrm -f \"C:/Users/arian/source/repos/workflow-app/backend/data/app.db\" \\\\\n       \"C:/Users/arian/source/repos/workflow-app/backend/data/app.db-shm\" \\\\\n       \"C:/Users/arian/source/repos/workflow-app/backend/data/app.db-wal\"\necho \"cleaned\")"
+    ]
+  }
+}

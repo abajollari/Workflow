@@ -1,0 +1,722 @@
+================================================================================
+  WORKFLOW APP — TEAM PRESENTATION
+================================================================================
+
+
+WHAT IS IT?
+-----------
+A full-stack customer workflow management platform. It lets the business define
+multi-step processes (onboarding, approvals, proposals, sales cycles), then run
+individual customer projects through them — tracking exactly where each project
+is, what tasks are outstanding, who is responsible, and triggering automated
+actions (DocuSign envelopes, external API calls) without any manual steps.
+
+The platform is built for real-time, multi-team collaboration. When one user
+on the Engineering team advances a project, every other user watching that
+project — whether they are on the Analysis team, QA, or DevOps — sees the
+workflow graph update instantly without refreshing the page. Notifications
+surface across all open projects simultaneously via a global event stream.
+
+
+TECHNOLOGY OVERVIEW
+-------------------
+  Frontend     Angular 17   (standalone components, RxJS, pure SVG rendering)
+  Backend      Express 5    (TypeScript, Node.js)
+  Database     SQLite       (better-sqlite3, WAL mode for concurrent reads)
+  Messaging    Apache Kafka (KafkaJS — decoupled event fan-out)
+  Real-time    Server-Sent Events (SSE — project-scoped + global streams)
+  E-Signatures DocuSign     (JWT server-to-server, template-based envelopes)
+  File storage Disk         (multer, 50 MB limit, served via streaming)
+
+  Frontend:  http://localhost:4200
+  Backend:   http://localhost:3000
+  Kafka:     localhost:9092
+
+
+================================================================================
+  ARCHITECTURE DIAGRAM — MULTIPLE TEAMS & PROJECTS
+================================================================================
+
+  Multiple organisations / teams access the same backend simultaneously.
+  Each team owns specific activities in the workflow. Kafka decouples the
+  completion event from the notification fan-out across all connected clients.
+
+  ┌─────────────────────────────────────────────────────────────────────────┐
+  │                         BROWSER CLIENTS                                 │
+  │                                                                         │
+  │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  ┌────────────┐ │
+  │  │ Analysis Team│  │ Design Team  │  │ Eng Team     │  │ QA Team    │ │
+  │  │  User A      │  │  User B      │  │  User C      │  │  User D    │ │
+  │  │  (Project 1) │  │  (Project 1) │  │  (Project 1) │  │(Project 2) │ │
+  │  │  Angular 17  │  │  Angular 17  │  │  Angular 17  │  │ Angular 17 │ │
+  │  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘  └─────┬──────┘ │
+  │         │  HTTP/SSE        │  HTTP/SSE        │  HTTP/SSE      │ SSE    │
+  └─────────┼──────────────────┼──────────────────┼────────────────┼────────┘
+            │                  │                  │                │
+            ▼                  ▼                  ▼                ▼
+  ┌─────────────────────────────────────────────────────────────────────────┐
+  │                       EXPRESS 5 API  (:3000)                            │
+  │                                                                         │
+  │  REST Routes                    SSE Endpoints                           │
+  │  ───────────────────────────    ─────────────────────────────────────  │
+  │  POST /api/projects             GET /api/workflow/stream?projectId=X    │
+  │  GET  /api/projects/:id/        GET /api/workflow/stream/global         │
+  │        activities               (one persistent connection per tab)     │
+  │  POST  .../complete   ──────────────────────────────────────────────┐  │
+  │  PATCH .../tasks/:id            POST /api/docusign/send             │  │
+  │  POST  .../assign               POST /api/docusign/webhook          │  │
+  │  GET   /api/workflow/versions                                        │  │
+  │  POST  /api/artifacts                                                │  │
+  │  GET   /api/projects/:id/events (audit log)                         │  │
+  │                                                                      │  │
+  │  WorkflowEngine (singleton)                                          │  │
+  │  ┌─────────────────────────────────────────────────────────────┐    │  │
+  │  │  initProject → activateActivity → resolveNextActivities      │    │  │
+  │  │  completeActivity → parallel join logic → loop counters      │    │  │
+  │  │  assignUser (validates team ownership)                       │    │  │
+  │  │  triggerActivity → ActivityHandlerRegistry → run handler     │    │  │
+  │  └────────────────────────────┬────────────────────────────────┘    │  │
+  │                               │                                      │  │
+  │  ActivityHandlerRegistry                                             │  │
+  │  ┌──────────────────────────────────────────────────────────────┐   │  │
+  │  │  'weather'       → weatherHandler      (Open-Meteo API)      │   │  │
+  │  │  'send_proposal' → sendProposalHandler (DocuSign JWT)        │   │  │
+  │  └──────────────────────────────────────────────────────────────┘   │  │
+  │                                                                      │  │
+  └──────────────────────────────┬───────────────────────────────────┬──┘  │
+                                 │                                   │     │
+                                 ▼                                   ▼     │
+  ┌──────────────────────┐    ┌──────────────────────────────────────────┐ │
+  │   SQLite Database    │    │              APACHE KAFKA                │ │
+  │   (WAL mode)         │    │              (:9092)                     │ │
+  │                      │    │                                          │ │
+  │  workflow_version    │    │  Topic: workflow-events (1 partition)    │ │
+  │  activity_definition │    │                                          │ │
+  │  activity_transition │    │  Producer (workflowProducer.ts)          │ │
+  │  activity_task       │    │    publishWorkflowEvent()                │ │
+  │  project             │    │    ↓  fire-and-forget after HTTP resp    │ │
+  │  project_activity    │    │  ┌───────────────────────────────────┐  │ │
+  │  project_activity_   │    │  │  { type, projectId, activityId,   │  │ │
+  │    task              │    │  │    activatedActivities[], ts }     │  │ │
+  │  assignment          │    │  └───────────────────────────────────┘  │ │
+  │  artifact            │    │    ↓                                     │ │
+  │  activity_event      │    │  Consumer (workflowConsumer.ts)          │ │
+  │  team                │    │    group: workflow-consumer-group        │ │
+  │  user                │    │    startWorkflowConsumer() on boot       │ │
+  │  docusign_envelope   │    │    ↓  deserialise JSON                   │ │
+  └──────────────────────┘    │    broadcastWorkflowEvent()              │ │
+                              │    ↓                                     │ │
+                              │  SSE Client Registry (in-memory)         │ │
+                              │    Map<projectId, Set<Response>>  ───────┼─┘
+                              │    Set<Response>  (global clients)       │
+                              └──────────────────────────────────────────┘
+
+  Result: User C (Eng Team) completes an activity on Project 1.
+    → HTTP 200 returned immediately to User C
+    → WorkflowEngine advances the project state in SQLite
+    → publishWorkflowEvent() sends to Kafka (async, non-blocking)
+    → Consumer picks it up, pushes SSE frame to User A and User B
+    → User A and User B see the graph update with no page refresh
+    → User D (different project) sees a global notification badge
+
+
+================================================================================
+  CORE CONCEPTS
+================================================================================
+
+  Workflow Version
+    A named, versioned blueprint of a process. Contains activities (nodes),
+    transitions (directed edges), and task templates (checklists per activity).
+    Only one version can be active at a time. New projects always adopt the
+    currently active version. Versions can be created, edited, activated, and
+    deactivated through the Workflows UI.
+
+  Activity
+    A single step in the workflow — e.g. "Gather Requirements", "Send Proposal",
+    "Testing". Each activity carries:
+      - type         : start | end | task | decision | loop | parallel
+      - actionType   : manual | automated | approval | gate
+      - ownerTeam    : which team is responsible
+      - slaHours     : optional time budget
+      - config       : JSON blob used by automated handlers
+      - col / row    : grid position for SVG rendering
+
+  Transition
+    A directed edge from one activity to another. Can carry a condition string
+    (e.g. "approved", "rejected", "pass", "fail") which is evaluated at runtime
+    against the decision outcome to pick the correct outgoing path.
+    Special edge types: "loop" (for back-edges in iteration cycles).
+
+  Project
+    A customer account being run through a workflow. Stores the current active
+    activity, a reference to its workflow version, and accumulates all activity
+    history, tasks, assignments, artifacts, and audit events.
+
+  Activity Task
+    A checklist template attached to an activity definition. When a project
+    activates that activity, all task templates are instantiated into
+    project_activity_task rows. Users cycle each task through:
+      new → in_progress → done
+    When the last task reaches "done", the activity is automatically completed
+    by the backend, advancing the workflow without a separate user action.
+
+  Artifact
+    A document, email, or message attached to a project. Supports file uploads
+    (up to 50 MB, stored on disk) and plain-text notes.
+
+  Audit Log  (activity_event table)
+    Append-only record of every significant state change:
+      activity.activated   — activity became available
+      activity.completed   — user or engine completed an activity
+      task.started         — task moved to in_progress
+      task.completed       — task moved to done
+      user.assigned        — user assigned to an activity
+
+
+================================================================================
+  WORKFLOW ENGINE
+================================================================================
+
+File: backend/src/engine/WorkflowEngine.ts
+
+The engine is the authoritative state machine of the system. It is a plain
+TypeScript singleton with no HTTP knowledge — it only reads and writes SQLite
+and delegates to the ActivityHandlerRegistry for automated work.
+
+Key methods:
+
+  initProject(projectId)
+    Creates the project record, activates the "start" activity, and immediately
+    completes it (start is a pass-through), causing the engine to advance
+    automatically to the first real activity.
+
+  completeActivity(projectId, activityKey, opts?)
+    The main advancement method. Called when a user or the engine marks an
+    activity as done.
+      1. Marks project_activity as "completed".
+      2. Logs activity.completed in the audit log.
+      3. Calls resolveNextActivities() — finds outgoing transitions, applies
+         outcome filtering for decision nodes, checks parallel join readiness.
+      4. Calls activateActivity() for each resolved next activity.
+      5. Syncs project.activity to the current active step.
+      6. Returns { activated: string[] } to the caller.
+
+  activateActivity(projectId, activityKey)
+      1. Inserts a project_activity row (status = "active").
+      2. Instantiates all task templates for that activity.
+      3. Logs activity.activated.
+      4. If actionType = "automated", immediately invokes the handler via
+         ActivityHandlerRegistry (async, non-blocking from HTTP perspective).
+
+  assignUser(projectActivityId, userId)
+    Validates the user belongs to the team that owns the activity. Creates
+    an assignment record. Logs user.assigned.
+
+  resolveNextActivities(projectId, activityKey, outcome?)
+    Reads outgoing transitions. For decision nodes, returns only transitions
+    whose condition matches the outcome. For parallel splits, returns all
+    outgoing paths. For parallel joins, checks that every incoming parallel
+    branch has completed before allowing the join to activate.
+
+  triggerActivity(projectId, activityKey, configOverride?)
+    Manually fires the handler for an approval or automated activity.
+    Used by the DocuSign route when a user clicks "Send Proposal" from the UI.
+
+  checkParallelJoin(projectId)
+    Scans all activities with incoming parallel edges and confirms every
+    branch is in "completed" status before the join activates.
+
+Guarantees:
+  - All state changes are written inside synchronous SQLite transactions.
+  - The audit log is always consistent with project_activity state.
+  - Parallel branches cannot diverge past a join node.
+  - Loop iteration counters prevent infinite cycles.
+
+
+================================================================================
+  ACTIVITY HANDLER REGISTRY
+================================================================================
+
+File: backend/src/engine/ActivityHandlerRegistry.ts
+File: backend/src/handlers/
+
+The registry is an in-memory map of handler name → async function. Handlers
+are registered once at startup and looked up by the engine at runtime via the
+activity's actionType config.
+
+  HandlerContext   { projectId, activityKey, projectActivityId, versionId, config }
+  HandlerResult    { outcome?: string; payload?: object }
+  ActivityHandler  (ctx: HandlerContext) => Promise<HandlerResult>
+
+Registered handlers:
+
+  'weather'  (weatherHandler.ts)
+    Simulates a data-gathering step. Waits 5 seconds, then calls the
+    Open-Meteo public API with lat/lon from the activity config. Returns
+    temperature and windspeed as the payload. Used by the "Gather Requirements"
+    activity to demonstrate automated data retrieval.
+
+  'send_proposal'  (sendProposalHandler.ts)
+    Calls the DocuSign service (JWT auth) to send a signature envelope using
+    a pre-configured template. Stores the returned envelopeId in the
+    docusign_envelope table so the webhook can later close the loop. Returns
+    outcome: 'sent'.
+
+Adding a new handler requires only:
+  1. Writing an async function matching the ActivityHandler signature.
+  2. Registering it in handlers/index.ts.
+  3. Setting actionType = "automated" and config on the activity definition.
+  No changes to the engine or routes are required.
+
+
+================================================================================
+  DOCUSIGN INTEGRATION
+================================================================================
+
+Files:
+  backend/src/services/docusign.service.ts
+  backend/src/handlers/sendProposalHandler.ts
+  backend/src/routes/docusign.ts
+
+Authentication: JWT server-to-server (no user popup). The backend holds an RSA
+private key and impersonates the DocuSign admin account to send envelopes on
+behalf of the organisation.
+
+Configuration (env vars):
+  DOCUSIGN_BASE_PATH       API base (https://demo.docusign.net/restapi)
+  DOCUSIGN_CLIENT_ID       Integration Key
+  DOCUSIGN_USER_ID         API Username
+  DOCUSIGN_PRIVATE_KEY     RSA private key (PEM, \n-escaped)
+  DOCUSIGN_ACCOUNT_ID
+  DOCUSIGN_TEMPLATE_ID     Pre-built envelope template in DocuSign Admin
+
+Envelope flow:
+  1. User opens the DocuSign dialog in the header (or the engine triggers
+     'send_proposal' automatically as part of a workflow step).
+  2. POST /api/docusign/send receives { buyer, seller, agreementParty,
+     jurisdiction, projectId?, activityId? }.
+  3. docusign.service.ts builds an EnvelopeDefinition with two roles (Buyer,
+     Seller), pre-fills shared tabs (Agreement Party, Jurisdiction), and calls
+     the DocuSign Envelopes API.
+  4. The returned envelopeId is stored in docusign_envelope (envelopeId ↔ projectId).
+  5. DocuSign emails the signatories. Signatories complete signing in DocuSign's
+     own UI (no custom UI required).
+  6. When the envelope is completed, DocuSign Connect calls:
+     POST /api/docusign/webhook
+  7. The webhook handler looks up the project by envelopeId, calls
+     WorkflowEngine.completeActivity('signed'), advancing the workflow.
+
+  Two trigger modes:
+    Standalone   — called directly from UI, returns { envelopeId } (sync 200)
+    Workflow     — called via triggerActivity(), returns 202 immediately while
+                   the handler runs async; webhook later closes the activity.
+
+
+================================================================================
+  KAFKA: ARCHITECTURE, PRODUCER & CONSUMER
+================================================================================
+
+Why Kafka?
+----------
+Every workflow advancement must be broadcast to all users currently watching
+that project. A naive solution (HTTP polling, direct SSE write inside the route
+handler) creates coupling between the request path and notification fan-out.
+
+Kafka solves this cleanly:
+  - The HTTP handler completes fast: write to DB, publish to Kafka, respond.
+  - A dedicated consumer process handles the fan-out to SSE clients.
+  - If the server restarts, Kafka's consumer group offsets ensure no events
+    are lost — the consumer resumes from where it stopped.
+  - The architecture trivially scales: multiple backend instances can each
+    run a consumer and serve SSE clients; Kafka partitioning distributes load.
+
+Kafka Client
+------------
+File: backend/src/kafka/client.ts
+
+  new Kafka({
+    clientId: 'workflow-app',
+    brokers:  ['localhost:9092'],
+    logLevel: WARN,
+    retry: { retries: 5, initialRetryTime: 1000, factor: 2 }
+  })
+
+Singleton client shared by producer, consumer, and admin clients.
+
+The WorkflowEvent (message contract)
+-------------------------------------
+File: backend/src/kafka/workflowEvents.ts
+
+  interface WorkflowEvent {
+    type:                'activity.completed'
+    projectId:           number    — which project changed
+    activityId:          string    — the activity that was completed
+    activatedActivities: string[]  — activities now active (may be multiple
+                                     in parallel-split scenarios)
+    timestamp:           string    — ISO 8601
+  }
+
+This single message shape carries everything the frontend needs to update the
+graph. The consumer does not need to query the database.
+
+The Producer
+------------
+File: backend/src/kafka/workflowProducer.ts
+
+  publishWorkflowEvent(event: WorkflowEvent): Promise<void>
+
+Called from activities.ts immediately after WorkflowEngine.completeActivity()
+returns and after the HTTP response has been sent. The producer is:
+
+  Fire-and-forget:   HTTP response goes out before awaiting Kafka.
+  Lazily connected:  First call triggers producer.connect(); subsequent calls
+                     reuse the open connection.
+  Topic:             'workflow-events' (1 partition, auto-created by consumer).
+  Serialisation:     JSON.stringify(event) as the Kafka message value.
+
+Logging:
+  [kafka] workflow producer connected
+  [kafka] published activity.completed for project 3, activated: [testing]
+
+The Consumer
+------------
+File: backend/src/kafka/workflowConsumer.ts
+
+  startWorkflowConsumer(): Promise<void>
+
+Started once in index.ts at server boot. Lifecycle:
+
+  1. Delays 4.5 s on startup (staggered: weather consumer starts at 3 s to
+     avoid admin client port contention — both use Kafka admin to create topics).
+  2. Kafka admin client ensures 'workflow-events' topic exists (creates if not).
+  3. Connects consumer in group 'workflow-consumer-group'.
+  4. Subscribes from current offset (fromBeginning: false) — only new events
+     are processed, not historical replays.
+  5. For each message:
+       a. Parses JSON into WorkflowEvent.
+       b. Calls broadcastWorkflowEvent(event).
+
+Consumer group offset tracking:
+  Kafka persists the last-read offset for 'workflow-consumer-group'. If the
+  Express server crashes and restarts, the consumer resumes from the next
+  unprocessed message, guaranteeing at-least-once delivery to SSE clients.
+
+The SSE Bridge
+--------------
+File: backend/src/kafka/workflowEvents.ts
+
+  broadcastWorkflowEvent(event: WorkflowEvent): void
+
+Maintains two in-memory registries:
+
+  projectClients:  Map<projectId, Set<Response>>
+                   One entry per project; Set holds one Response per open tab.
+
+  globalClients:   Set<Response>
+                   Holds every tab subscribed to the global notification stream.
+
+When called:
+  1. Looks up projectClients.get(event.projectId).
+  2. Writes 'data: <JSON>\n\n' to each Response (SSE wire format).
+  3. Also writes to every entry in globalClients (cross-project notifications).
+
+SSE endpoint lifecycle (index.ts):
+  GET /api/workflow/stream?projectId=X
+    → sets headers: Content-Type: text/event-stream, Cache-Control: no-cache
+    → registers res in projectClients
+    → on req 'close': removes res from registry (prevents memory leak)
+
+  GET /api/workflow/stream/global
+    → same pattern, registers in globalClients
+
+Kafka → SSE message path (end-to-end):
+
+  activities.ts
+    publishWorkflowEvent()          [workflowProducer.ts]
+        ↓  Kafka topic: workflow-events
+    workflowConsumer.ts receives message
+        ↓
+    broadcastWorkflowEvent()        [workflowEvents.ts]
+        ↓  SSE data frame
+    Browser EventSource             [workflow-execution.service.ts]
+        ↓  event$ Subject (RxJS)
+    WorkflowGraphComponent
+        ↓
+    re-fetch project → re-render graph
+
+The Frontend SSE Clients
+------------------------
+File: src/app/services/workflow-execution.service.ts (project-scoped)
+File: src/app/services/notification.service.ts       (global)
+
+  WorkflowExecutionService
+    connect(projectId)   — EventSource → /api/workflow/stream?projectId=X
+    disconnect()         — closes connection
+    event$               — RxJS Subject<WorkflowEvent>
+    Auto-reconnects on error with exponential backoff.
+
+  NotificationService (Angular signals)
+    connect()            — EventSource → /api/workflow/stream/global
+    notifications        — signal (array, max 50, persisted in localStorage)
+    unreadCount          — computed signal (badge count in header)
+    Auto-reconnects on error with 5 s backoff.
+
+The workflow graph component subscribes to event$ and, on receipt, re-fetches
+the project then re-renders — showing the newly active activity highlighted
+without a page refresh.
+
+The notification service drives the bell icon in the header: any project
+advance anywhere in the system increments the unread badge.
+
+
+================================================================================
+  REAL-TIME EVENT FLOW (END-TO-END)
+================================================================================
+
+Scenario: User C (Engineering) completes the last task on the "Backend Dev"
+activity for Project 1. Users A (Analysis) and B (Design) are also watching
+Project 1. User D (QA) is watching a different project.
+
+  Step 1   User C clicks the "done" status badge on the last checklist task.
+
+  Step 2   Angular sends:
+             PATCH /api/projects/1/activities/backend_dev/tasks/42
+             { "status": "done" }
+
+  Step 3   Route handler:
+             - Updates project_activity_task row → status = 'done'
+             - Logs task.completed in activity_event
+             - Checks: all tasks done? Yes.
+             - Calls WorkflowEngine.completeActivity('backend_dev')
+
+  Step 4   WorkflowEngine:
+             - project_activity[backend_dev] → status = 'completed'
+             - Logs activity.completed
+             - resolveNextActivities('backend_dev') → ['parallel_join']
+             - checkParallelJoin: frontend_dev also completed? → Yes
+             - activateActivity('parallel_join')
+               → inserts project_activity row
+               → instantiates tasks
+               → logs activity.activated
+             - Syncs project.activity = 'parallel_join'
+             - Returns { activated: ['parallel_join'] }
+
+  Step 5   Route handler sends HTTP 200 + { activated: ['parallel_join'] }
+             to User C's browser.
+             User C's graph updates immediately from this response.
+
+  Step 6   Fire-and-forget (does not block the response):
+             publishWorkflowEvent({
+               type: 'activity.completed',
+               projectId: 1,
+               activityId: 'backend_dev',
+               activatedActivities: ['parallel_join'],
+               timestamp: '...'
+             })
+
+  Step 7   Kafka receives the message on 'workflow-events'.
+
+  Step 8   workflowConsumer.ts receives it, calls broadcastWorkflowEvent().
+
+  Step 9   SSE bridge writes 'data: {...}\n\n' to:
+             - User A's open EventSource for Project 1
+             - User B's open EventSource for Project 1
+             - User D's global EventSource (notification only)
+
+  Step 10  In User A's and User B's browsers:
+             WorkflowExecutionService.event$ emits the WorkflowEvent.
+             WorkflowGraphComponent re-fetches project 1 from the API.
+             SVG graph re-renders: parallel_join node lights up as active.
+
+  Step 11  In User D's browser:
+             NotificationService receives the global event.
+             notifications signal appends a new entry.
+             unreadCount computed signal increments.
+             Bell badge shows the new count.
+
+  Result: All three observers see the update within milliseconds. No polling.
+  No page refresh. The HTTP path (steps 1–5) completes independently of the
+  notification fan-out (steps 6–11).
+
+
+================================================================================
+  DATABASE SCHEMA
+================================================================================
+
+  WORKFLOW DEFINITION (static blueprint)
+  ───────────────────────────────────────
+  workflow_version        id, name, description, isActive
+  activity_definition     id, versionId, activityKey, label, nodeType, col, row,
+                            teamId, actionType, slaHours, config (JSON)
+  activity_transition     id, versionId, fromActivityId, toActivityId,
+                            condition, edgeType
+  activity_task           id, activityId, title, description, orderIndex
+
+  RUNTIME STATE (per project)
+  ───────────────────────────
+  project                 id, accountNumber, accountName, activity,
+                            workflowVersionId, createdAt
+  project_activity        id, projectId, activityId, status (active/completed),
+                            decisionOutcome, iterationCount, startedAt, completedAt
+  project_activity_task   id, projectActivityId, taskId, status (new/in_progress/done)
+  assignment              id, projectActivityId, userId, assignedAt, completedAt, notes
+
+  ASSETS & AUDIT
+  ──────────────
+  artifact                id, projectId, type, title, content, fileName,
+                            filePath, mimeType, fileSize, createdAt
+  activity_event          id, eventType, projectId, activityId, userId,
+                            payload (JSON), occurredAt   [append-only]
+  docusign_envelope       id, envelopeId, projectId, createdAt
+
+  ORGANISATION
+  ────────────
+  team                    id, name
+  user                    id, email, name, teamId
+
+  Foreign keys are enforced. Cascading deletes are applied at the application
+  layer (project.ts route) in dependency order.
+
+
+================================================================================
+  FRONTEND ARCHITECTURE
+================================================================================
+
+App Shell
+  AppComponent             root layout (header + router-outlet + footer)
+  HeaderComponent          nav, project selector, notifications, dialogs
+  FooterComponent          branding
+
+Pages (router-outlet)
+  HomeComponent            hero + WorkflowGraphComponent
+  ArtifactsComponent       file upload and document listing per project
+  WorkflowsComponent       version list, activate/deactivate controls
+  WorkflowCreateComponent  form to define a new version (full workflow POST)
+  WorkflowEditComponent    edit existing version (full workflow PUT)
+
+Key Components
+  WorkflowGraphComponent   900-line SVG graph renderer
+    - Pure SVG (no D3, no Canvas)
+    - Grid-based layout: CELL_W=140 × CELL_H=120, NODE_W=100, NODE_H=56
+    - Node shapes by type: circle (start/end), rounded rect (task),
+      dashed rect (decision), hexagon (parallel), pill (loop)
+    - Color coding: green (start/end/completed), cyan (active), blue (task),
+      pink (decision), amber (loop), violet (parallel)
+    - Interactions: click (task panel), hover (tooltip), scroll (zoom 0.3–3×),
+      drag (pan)
+    - Real-time: subscribes to WorkflowExecutionService.event$, refetches on
+      each WorkflowEvent for the current project
+
+  ActivityTasksComponent   task panel (shown when a node is clicked)
+    - manual    — task list with status cycling, auto-completes activity
+    - automated — spinner while running, payload shown on completion
+    - approval  — "Run" button to trigger handler
+    - gate      — "Waiting for gate release" placeholder
+
+Services (root-scoped singletons)
+  WorkflowDataService        loads activities/transitions, BFS completed-node set
+  WorkflowExecutionService   EventSource wrapper → event$ Subject
+  NotificationService        global EventSource, Angular signals, localStorage
+  SelectedProjectService     selected project signal shared across components
+
+Models
+  WorkflowNode     { id, label, type, col, row, actionType }
+  WorkflowEdge     { from, to, label?, type? }
+  NodeType         'start' | 'end' | 'task' | 'decision' | 'loop' | 'parallel'
+  ActionType       'manual' | 'automated' | 'approval' | 'gate'
+
+
+================================================================================
+  API REFERENCE
+================================================================================
+
+  Health
+    GET  /api/health
+
+  Projects
+    GET    /api/projects
+    GET    /api/projects/:id
+    POST   /api/projects                       { accountNumber, accountName }
+    PATCH  /api/projects/:id                   { accountName?, activity? }
+    DELETE /api/projects/:id
+
+  Activities
+    GET    /api/projects/:id/activities
+    POST   /api/projects/:id/activities/:key/complete   { outcome?, userId? }
+    POST   /api/projects/:id/activities/:key/trigger    { config? }
+    POST   /api/projects/:id/activities/:key/assign     { userId }
+    GET    /api/projects/:id/activities/:key/tasks
+    PATCH  /api/projects/:id/activities/:key/tasks/:tid { status }
+
+  Workflow Versions
+    GET    /api/workflow/versions
+    POST   /api/workflow/versions              { name, description }
+    PATCH  /api/workflow/versions/:id/activate
+    PATCH  /api/workflow/versions/:id/deactivate
+    GET    /api/workflow/activities            ?versionId=X
+    GET    /api/workflow/transitions           ?versionId=X
+    GET    /api/workflow/tasks                 ?versionId=X
+    POST   /api/workflow/full                  (create version + activities + transitions + tasks)
+    PUT    /api/workflow/full/:id              (replace entire version)
+
+  Teams & Users
+    GET    /api/teams
+    GET    /api/users                          ?teamId=X
+    POST   /api/users                          { email, name, teamId }
+
+  Artifacts
+    GET    /api/projects/:id/artifacts         ?type=X
+    POST   /api/projects/:id/artifacts         (multipart/form-data or JSON)
+    GET    /api/projects/:id/artifacts/:aid/file
+    DELETE /api/projects/:id/artifacts/:aid
+
+  Audit Log
+    GET    /api/projects/:id/events            ?activityId=X&eventType=Y&limit=200
+
+  DocuSign
+    POST   /api/docusign/send                  { buyer, seller, agreementParty,
+                                                 jurisdiction, projectId?, activityId? }
+    POST   /api/docusign/webhook               (DocuSign Connect callback)
+
+  SSE Streams
+    GET    /api/workflow/stream?projectId=X    (project-scoped)
+    GET    /api/workflow/stream/global         (all-project notifications)
+
+
+================================================================================
+  RUNNING THE PROJECT
+================================================================================
+
+  # Install dependencies
+  npm install
+  cd backend && npm install
+
+  # Start everything (Angular + Express concurrently)
+  npm run dev
+
+  # Frontend:  http://localhost:4200
+  # Backend:   http://localhost:3000
+  # Kafka:     localhost:9092  (must be running separately — see below)
+
+  # Start Kafka (Docker example)
+  docker run -d --name kafka -p 9092:9092 \
+    -e KAFKA_CFG_NODE_ID=0 \
+    -e KAFKA_CFG_PROCESS_ROLES=controller,broker \
+    -e KAFKA_CFG_LISTENERS=PLAINTEXT://:9092,CONTROLLER://:9093 \
+    -e KAFKA_CFG_CONTROLLER_LISTENER_NAMES=CONTROLLER \
+    bitnami/kafka:latest
+
+  # Backend environment (backend/.env)
+  DOCUSIGN_BASE_PATH=https://demo.docusign.net/restapi
+  DOCUSIGN_CLIENT_ID=...
+  DOCUSIGN_USER_ID=...
+  DOCUSIGN_PRIVATE_KEY=...
+  DOCUSIGN_ACCOUNT_ID=...
+  DOCUSIGN_TEMPLATE_ID=...
+
+  Note: Kafka is optional. The app starts and all workflow operations work
+  without it. The only degraded behaviour is that real-time cross-client
+  graph updates and global notifications are not delivered until Kafka is
+  available.
+
+================================================================================

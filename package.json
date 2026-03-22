@@ -1,0 +1,16 @@
+{
+  "name": "workflow",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "install:all": "npm install --prefix workflow-app && npm install --prefix workflow-engine",
+    "dev": "concurrently -n \"frontend,engine\" -c \"cyan,green\" \"npm start --prefix workflow-app\" \"npm run dev --prefix workflow-engine\"",
+    "start:frontend": "npm start --prefix workflow-app",
+    "start:engine": "npm run dev --prefix workflow-engine",
+    "build:frontend": "npm run build --prefix workflow-app",
+    "build:engine": "npm run build --prefix workflow-engine"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  }
+}

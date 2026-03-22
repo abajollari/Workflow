@@ -18,6 +18,13 @@ workflow graph update instantly without refreshing the page. Notifications
 surface across all open projects simultaneously via a global event stream.
 
 
+REPOSITORY LAYOUT
+-----------------
+  Workflow/
+  ├── workflow-app/        Angular 17 frontend
+  └── workflow-engine/     Express 5 / TypeScript backend
+
+
 TECHNOLOGY OVERVIEW
 -------------------
   Frontend     Angular 17   (standalone components, RxJS, pure SVG rendering)
@@ -26,11 +33,24 @@ TECHNOLOGY OVERVIEW
   Messaging    Apache Kafka (KafkaJS — decoupled event fan-out)
   Real-time    Server-Sent Events (SSE — project-scoped + global streams)
   E-Signatures DocuSign     (JWT server-to-server, template-based envelopes)
-  File storage Disk         (multer, 50 MB limit, served via streaming)
+  File storage Azure Blob   (@azure/storage-blob, 100 MB limit, SAS URL support)
+  CRM          Salesforce   (inbound webhook — project creation & submission)
 
   Frontend:  http://localhost:4200
-  Backend:   http://localhost:3000
+  Backend:   http://localhost:3001
   Kafka:     localhost:9092
+
+
+FRONTEND API GATEWAY
+--------------------
+  All HTTP and SSE calls from the Angular app pass through a single service:
+
+    EngineApiService  (workflow-app/src/app/services/engine-api.service.ts)
+      baseUrl = 'http://localhost:3001'
+
+  No component or other service accesses HttpClient directly. This makes the
+  backend URL a single configuration point and keeps every API path centrally
+  visible.
 
 
 ================================================================================
@@ -52,10 +72,10 @@ TECHNOLOGY OVERVIEW
   │  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘  └─────┬──────┘ │
   │         │  HTTP/SSE        │  HTTP/SSE        │  HTTP/SSE      │ SSE    │
   └─────────┼──────────────────┼──────────────────┼────────────────┼────────┘
-            │                  │                  │                │
+            │  (via EngineApiService — baseUrl: http://localhost:3001)
             ▼                  ▼                  ▼                ▼
   ┌─────────────────────────────────────────────────────────────────────────┐
-  │                       EXPRESS 5 API  (:3000)                            │
+  │                       EXPRESS 5 API  (:3001)                            │
   │                                                                         │
   │  REST Routes                    SSE Endpoints                           │
   │  ───────────────────────────    ─────────────────────────────────────  │
@@ -65,9 +85,10 @@ TECHNOLOGY OVERVIEW
   │  POST  .../complete   ──────────────────────────────────────────────┐  │
   │  PATCH .../tasks/:id            POST /api/docusign/send             │  │
   │  POST  .../assign               POST /api/docusign/webhook          │  │
-  │  GET   /api/workflow/versions                                        │  │
-  │  POST  /api/artifacts                                                │  │
-  │  GET   /api/projects/:id/events (audit log)                         │  │
+  │  GET   /api/workflow/versions   POST /api/salesforce/start          │  │
+  │  POST  /api/artifacts           POST /api/salesforce/submit/:acct   │  │
+  │  GET   /api/projects/:id/events POST /api/storage/:container/upload │  │
+  │  GET   /api/storage/sas/*                                           │  │
   │                                                                      │  │
   │  WorkflowEngine (singleton)                                          │  │
   │  ┌─────────────────────────────────────────────────────────────┐    │  │
@@ -75,24 +96,24 @@ TECHNOLOGY OVERVIEW
   │  │  completeActivity → parallel join logic → loop counters      │    │  │
   │  │  assignUser (validates team ownership)                       │    │  │
   │  │  triggerActivity → ActivityHandlerRegistry → run handler     │    │  │
-  │  └────────────────────────────┬────────────────────────────────┘    │  │
-  │                               │                                      │  │
+  │  └────────────────────────┬────────────────────────────────────┘    │  │
+  │                           │                                          │  │
   │  ActivityHandlerRegistry                                             │  │
   │  ┌──────────────────────────────────────────────────────────────┐   │  │
   │  │  'weather'       → weatherHandler      (Open-Meteo API)      │   │  │
   │  │  'send_proposal' → sendProposalHandler (DocuSign JWT)        │   │  │
   │  └──────────────────────────────────────────────────────────────┘   │  │
   │                                                                      │  │
-  └──────────────────────────────┬───────────────────────────────────┬──┘  │
-                                 │                                   │     │
-                                 ▼                                   ▼     │
+  └──────────────────────────┬───────────────────────────────────────┬──┘  │
+                             │                                   │     │
+                             ▼                                   ▼     │
   ┌──────────────────────┐    ┌──────────────────────────────────────────┐ │
   │   SQLite Database    │    │              APACHE KAFKA                │ │
   │   (WAL mode)         │    │              (:9092)                     │ │
   │                      │    │                                          │ │
   │  workflow_version    │    │  Topic: workflow-events (1 partition)    │ │
   │  activity_definition │    │                                          │ │
-  │  activity_transition │    │  Producer (workflowProducer.ts)          │ │
+  │  activity_transition │    │  Producer (kafka/producer.ts)            │ │
   │  activity_task       │    │    publishWorkflowEvent()                │ │
   │  project             │    │    ↓  fire-and-forget after HTTP resp    │ │
   │  project_activity    │    │  ┌───────────────────────────────────┐  │ │
@@ -100,16 +121,34 @@ TECHNOLOGY OVERVIEW
   │    task              │    │  │    activatedActivities[], ts }     │  │ │
   │  assignment          │    │  └───────────────────────────────────┘  │ │
   │  artifact            │    │    ↓                                     │ │
-  │  activity_event      │    │  Consumer (workflowConsumer.ts)          │ │
-  │  team                │    │    group: workflow-consumer-group        │ │
-  │  user                │    │    startWorkflowConsumer() on boot       │ │
-  │  docusign_envelope   │    │    ↓  deserialise JSON                   │ │
+  │  activity_event      │    │  Consumer (kafka/consumer.ts)            │ │
+  │  docusign_envelope   │    │    group: workflow-consumer-group        │ │
+  │  team                │    │    startWorkflowConsumer() on boot       │ │
+  │  user                │    │    ↓  deserialise JSON                   │ │
   └──────────────────────┘    │    broadcastWorkflowEvent()              │ │
                               │    ↓                                     │ │
                               │  SSE Client Registry (in-memory)         │ │
                               │    Map<projectId, Set<Response>>  ───────┼─┘
                               │    Set<Response>  (global clients)       │
                               └──────────────────────────────────────────┘
+
+       ┌──────────────────────────────────────┐
+       │         EXTERNAL INTEGRATIONS        │
+       │                                      │
+       │  DocuSign   (JWT server-to-server)   │
+       │  → sends envelope, stores envelopeId │
+       │  → webhook closes activity on sign   │
+       │                                      │
+       │  Azure Blob Storage                  │
+       │  → upload/download blobs             │
+       │  → generate SAS URLs                 │
+       │                                      │
+       │  Salesforce  (inbound webhook)       │
+       │  → POST /api/salesforce/start        │
+       │    creates project, advances engine  │
+       │  → POST /api/salesforce/submit/:acct │
+       │    advances project with payload     │
+       └──────────────────────────────────────┘
 
   Result: User C (Eng Team) completes an activity on Project 1.
     → HTTP 200 returned immediately to User C
@@ -161,8 +200,7 @@ TECHNOLOGY OVERVIEW
     by the backend, advancing the workflow without a separate user action.
 
   Artifact
-    A document, email, or message attached to a project. Supports file uploads
-    (up to 50 MB, stored on disk) and plain-text notes.
+    A document, email, or message attached to a project.
 
   Audit Log  (activity_event table)
     Append-only record of every significant state change:
@@ -177,7 +215,7 @@ TECHNOLOGY OVERVIEW
   WORKFLOW ENGINE
 ================================================================================
 
-File: backend/src/engine/WorkflowEngine.ts
+File: workflow-engine/src/engine/WorkflowEngine.ts
 
 The engine is the authoritative state machine of the system. It is a plain
 TypeScript singleton with no HTTP knowledge — it only reads and writes SQLite
@@ -237,8 +275,8 @@ Guarantees:
   ACTIVITY HANDLER REGISTRY
 ================================================================================
 
-File: backend/src/engine/ActivityHandlerRegistry.ts
-File: backend/src/handlers/
+File: workflow-engine/src/engine/ActivityHandlerRegistry.ts
+File: workflow-engine/src/handlers/
 
 The registry is an in-memory map of handler name → async function. Handlers
 are registered once at startup and looked up by the engine at runtime via the
@@ -274,9 +312,9 @@ Adding a new handler requires only:
 ================================================================================
 
 Files:
-  backend/src/services/docusign.service.ts
-  backend/src/handlers/sendProposalHandler.ts
-  backend/src/routes/docusign.ts
+  workflow-engine/src/services/docusign.service.ts
+  workflow-engine/src/handlers/sendProposalHandler.ts
+  workflow-engine/src/routes/docusign.ts
 
 Authentication: JWT server-to-server (no user popup). The backend holds an RSA
 private key and impersonates the DocuSign admin account to send envelopes on
@@ -313,6 +351,71 @@ Envelope flow:
 
 
 ================================================================================
+  AZURE BLOB STORAGE INTEGRATION
+================================================================================
+
+Files:
+  workflow-engine/src/services/azureStorage.service.ts
+  workflow-engine/src/routes/azureStorage.ts
+
+Authentication: Storage account name + account key (env vars).
+
+Configuration (env vars):
+  AZURE_STORAGE_ACCOUNT_NAME
+  AZURE_STORAGE_ACCOUNT_KEY
+
+Capabilities:
+  - Direct upload via multipart form-data (multer, in-memory, 100 MB max)
+  - Create text or JSON blobs directly from request body
+  - Streamed download with Content-Disposition header
+  - Blob listing with optional prefix filter
+  - SAS URL generation for upload, download, or container-level access
+    (expiry configurable, default 60 minutes)
+  - Delete blob
+
+Routes (all under /api/storage):
+  POST  /sas/upload              → { sasUrl } (upload SAS)
+  POST  /sas/download            → { sasUrl } (download SAS)
+  POST  /sas/container           → { sasUrl } (container SAS)
+  POST  /:container/upload       → { blobUrl, blobName, size }
+  POST  /:container/create       → { blobUrl, blobName }
+  GET   /:container/download/:blobName   → streamed file
+  GET   /:container/list         → [ { name, size, lastModified, ... } ]
+  DELETE /:container/:blobName   → 204
+
+
+================================================================================
+  SALESFORCE INTEGRATION
+================================================================================
+
+File: workflow-engine/src/routes/salesforce.ts
+
+The Salesforce integration exposes two inbound webhook endpoints that allow
+an external Salesforce instance to drive project creation and advancement
+without any human interaction in the workflow UI.
+
+  POST /api/salesforce/start
+    Body: { accountNumber, accountName, activity?, outcome? }
+    - Looks up the active workflow version.
+    - Creates a new project row.
+    - Calls WorkflowEngine.initProject() to activate the start node.
+    - Immediately calls WorkflowEngine.completeActivity('pqr_created') with
+      the full request body as the output payload.
+    - Returns 201 with the created project.
+    - Returns 409 if accountNumber already exists.
+
+  POST /api/salesforce/submit/:accountNumber
+    Body: any JSON object
+    - Looks up the project by accountNumber.
+    - Calls WorkflowEngine.completeActivity('pqr_submitted') with the payload.
+    - Returns 200 { status: 'received', data: payload }.
+
+Both endpoints feed directly into the WorkflowEngine, so all downstream
+activity advancement, task instantiation, Kafka events, and SSE fan-out
+behave identically to a user-initiated completion.
+
+
+================================================================================
   KAFKA: ARCHITECTURE, PRODUCER & CONSUMER
 ================================================================================
 
@@ -332,7 +435,7 @@ Kafka solves this cleanly:
 
 Kafka Client
 ------------
-File: backend/src/kafka/client.ts
+File: workflow-engine/src/kafka/client.ts
 
   new Kafka({
     clientId: 'workflow-app',
@@ -345,7 +448,7 @@ Singleton client shared by producer, consumer, and admin clients.
 
 The WorkflowEvent (message contract)
 -------------------------------------
-File: backend/src/kafka/workflowEvents.ts
+File: workflow-engine/src/kafka/events.ts
 
   interface WorkflowEvent {
     type:                'activity.completed'
@@ -361,7 +464,7 @@ graph. The consumer does not need to query the database.
 
 The Producer
 ------------
-File: backend/src/kafka/workflowProducer.ts
+File: workflow-engine/src/kafka/producer.ts
 
   publishWorkflowEvent(event: WorkflowEvent): Promise<void>
 
@@ -374,27 +477,15 @@ returns and after the HTTP response has been sent. The producer is:
   Topic:             'workflow-events' (1 partition, auto-created by consumer).
   Serialisation:     JSON.stringify(event) as the Kafka message value.
 
-Logging:
-  [kafka] workflow producer connected
-  [kafka] published activity.completed for project 3, activated: [testing]
-
 The Consumer
 ------------
-File: backend/src/kafka/workflowConsumer.ts
+File: workflow-engine/src/kafka/consumer.ts
 
   startWorkflowConsumer(): Promise<void>
 
-Started once in index.ts at server boot. Lifecycle:
-
-  1. Delays 4.5 s on startup (staggered: weather consumer starts at 3 s to
-     avoid admin client port contention — both use Kafka admin to create topics).
-  2. Kafka admin client ensures 'workflow-events' topic exists (creates if not).
-  3. Connects consumer in group 'workflow-consumer-group'.
-  4. Subscribes from current offset (fromBeginning: false) — only new events
-     are processed, not historical replays.
-  5. For each message:
-       a. Parses JSON into WorkflowEvent.
-       b. Calls broadcastWorkflowEvent(event).
+Started once in index.ts at server boot. On each message:
+  a. Parses JSON into WorkflowEvent.
+  b. Calls broadcastWorkflowEvent(event).
 
 Consumer group offset tracking:
   Kafka persists the last-read offset for 'workflow-consumer-group'. If the
@@ -403,7 +494,7 @@ Consumer group offset tracking:
 
 The SSE Bridge
 --------------
-File: backend/src/kafka/workflowEvents.ts
+File: workflow-engine/src/kafka/events.ts
 
   broadcastWorkflowEvent(event: WorkflowEvent): void
 
@@ -420,23 +511,14 @@ When called:
   2. Writes 'data: <JSON>\n\n' to each Response (SSE wire format).
   3. Also writes to every entry in globalClients (cross-project notifications).
 
-SSE endpoint lifecycle (index.ts):
-  GET /api/workflow/stream?projectId=X
-    → sets headers: Content-Type: text/event-stream, Cache-Control: no-cache
-    → registers res in projectClients
-    → on req 'close': removes res from registry (prevents memory leak)
-
-  GET /api/workflow/stream/global
-    → same pattern, registers in globalClients
-
 Kafka → SSE message path (end-to-end):
 
   activities.ts
-    publishWorkflowEvent()          [workflowProducer.ts]
+    publishWorkflowEvent()          [kafka/producer.ts]
         ↓  Kafka topic: workflow-events
-    workflowConsumer.ts receives message
+    kafka/consumer.ts receives message
         ↓
-    broadcastWorkflowEvent()        [workflowEvents.ts]
+    broadcastWorkflowEvent()        [kafka/events.ts]
         ↓  SSE data frame
     Browser EventSource             [workflow-execution.service.ts]
         ↓  event$ Subject (RxJS)
@@ -446,8 +528,8 @@ Kafka → SSE message path (end-to-end):
 
 The Frontend SSE Clients
 ------------------------
-File: src/app/services/workflow-execution.service.ts (project-scoped)
-File: src/app/services/notification.service.ts       (global)
+File: workflow-app/src/app/services/workflow-execution.service.ts  (project-scoped)
+File: workflow-app/src/app/services/notification.service.ts        (global)
 
   WorkflowExecutionService
     connect(projectId)   — EventSource → /api/workflow/stream?projectId=X
@@ -461,12 +543,8 @@ File: src/app/services/notification.service.ts       (global)
     unreadCount          — computed signal (badge count in header)
     Auto-reconnects on error with 5 s backoff.
 
-The workflow graph component subscribes to event$ and, on receipt, re-fetches
-the project then re-renders — showing the newly active activity highlighted
-without a page refresh.
-
-The notification service drives the bell icon in the header: any project
-advance anywhere in the system increments the unread badge.
+Both services build their SSE URL from EngineApiService.baseUrl, so they
+point to the correct backend port automatically.
 
 
 ================================================================================
@@ -479,7 +557,7 @@ Project 1. User D (QA) is watching a different project.
 
   Step 1   User C clicks the "done" status badge on the last checklist task.
 
-  Step 2   Angular sends:
+  Step 2   Angular sends (via EngineApiService):
              PATCH /api/projects/1/activities/backend_dev/tasks/42
              { "status": "done" }
 
@@ -516,7 +594,7 @@ Project 1. User D (QA) is watching a different project.
 
   Step 7   Kafka receives the message on 'workflow-events'.
 
-  Step 8   workflowConsumer.ts receives it, calls broadcastWorkflowEvent().
+  Step 8   kafka/consumer.ts receives it, calls broadcastWorkflowEvent().
 
   Step 9   SSE bridge writes 'data: {...}\n\n' to:
              - User A's open EventSource for Project 1
@@ -595,7 +673,7 @@ Pages (router-outlet)
   WorkflowEditComponent    edit existing version (full workflow PUT)
 
 Key Components
-  WorkflowGraphComponent   900-line SVG graph renderer
+  WorkflowGraphComponent   SVG graph renderer
     - Pure SVG (no D3, no Canvas)
     - Grid-based layout: CELL_W=140 × CELL_H=120, NODE_W=100, NODE_H=56
     - Node shapes by type: circle (start/end), rounded rect (task),
@@ -614,13 +692,14 @@ Key Components
     - gate      — "Waiting for gate release" placeholder
 
 Services (root-scoped singletons)
+  EngineApiService           single HTTP gateway → workflow-engine (:3001)
   WorkflowDataService        loads activities/transitions, BFS completed-node set
   WorkflowExecutionService   EventSource wrapper → event$ Subject
   NotificationService        global EventSource, Angular signals, localStorage
   SelectedProjectService     selected project signal shared across components
 
 Models
-  WorkflowNode     { id, label, type, col, row, actionType }
+  WorkflowNode     { id, label, type, col, row, actionType, inputSchema? }
   WorkflowEdge     { from, to, label?, type? }
   NodeType         'start' | 'end' | 'task' | 'decision' | 'loop' | 'parallel'
   ActionType       'manual' | 'automated' | 'approval' | 'gate'
@@ -678,6 +757,20 @@ Models
                                                  jurisdiction, projectId?, activityId? }
     POST   /api/docusign/webhook               (DocuSign Connect callback)
 
+  Azure Blob Storage
+    POST   /api/storage/sas/upload             { container, blobName, expiresInMinutes? }
+    POST   /api/storage/sas/download           { container, blobName, expiresInMinutes? }
+    POST   /api/storage/sas/container          { container, permissions, expiresInMinutes? }
+    POST   /api/storage/:container/upload      multipart file (100 MB max)
+    POST   /api/storage/:container/create      { blobName, content, contentType? }
+    GET    /api/storage/:container/download/:blobName
+    GET    /api/storage/:container/list        ?prefix=X
+    DELETE /api/storage/:container/:blobName
+
+  Salesforce
+    POST   /api/salesforce/start               { accountNumber, accountName }
+    POST   /api/salesforce/submit/:accountNumber  any JSON body
+
   SSE Streams
     GET    /api/workflow/stream?projectId=X    (project-scoped)
     GET    /api/workflow/stream/global         (all-project notifications)
@@ -688,14 +781,15 @@ Models
 ================================================================================
 
   # Install dependencies
-  npm install
-  cd backend && npm install
+  cd workflow-app    && npm install
+  cd workflow-engine && npm install
 
-  # Start everything (Angular + Express concurrently)
-  npm run dev
+  # Start frontend  (http://localhost:4200)
+  cd workflow-app && npm start
 
-  # Frontend:  http://localhost:4200
-  # Backend:   http://localhost:3000
+  # Start backend   (http://localhost:3001)
+  cd workflow-engine && npm run dev
+
   # Kafka:     localhost:9092  (must be running separately — see below)
 
   # Start Kafka (Docker example)
@@ -706,13 +800,15 @@ Models
     -e KAFKA_CFG_CONTROLLER_LISTENER_NAMES=CONTROLLER \
     bitnami/kafka:latest
 
-  # Backend environment (backend/.env)
+  # Backend environment (workflow-engine/.env)
   DOCUSIGN_BASE_PATH=https://demo.docusign.net/restapi
   DOCUSIGN_CLIENT_ID=...
   DOCUSIGN_USER_ID=...
   DOCUSIGN_PRIVATE_KEY=...
   DOCUSIGN_ACCOUNT_ID=...
   DOCUSIGN_TEMPLATE_ID=...
+  AZURE_STORAGE_ACCOUNT_NAME=...
+  AZURE_STORAGE_ACCOUNT_KEY=...
 
   Note: Kafka is optional. The app starts and all workflow operations work
   without it. The only degraded behaviour is that real-time cross-client

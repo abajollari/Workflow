@@ -578,7 +578,7 @@ interface TaskDraft {
   `],
 })
 export class WorkflowEditComponent implements OnInit {
-  private http    = inject(EngineApiService);
+  private engine  = inject(EngineApiService);
   private router  = inject(Router);
   private route   = inject(ActivatedRoute);
 

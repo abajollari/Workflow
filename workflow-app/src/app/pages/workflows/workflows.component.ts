@@ -297,7 +297,7 @@ interface WorkflowVersion {
   `],
 })
 export class WorkflowsComponent implements OnInit {
-  private http   = inject(EngineApiService);
+  private engine = inject(EngineApiService);
   private router = inject(Router);
 
   versions: WorkflowVersion[] = [];

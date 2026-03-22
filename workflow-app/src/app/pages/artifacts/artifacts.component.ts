@@ -1130,7 +1130,7 @@ const TYPE_COLORS: Record<string, string> = {
   `],
 })
 export class ArtifactsComponent implements OnInit {
-  private http = inject(EngineApiService);
+  private engine = inject(EngineApiService);
   private router = inject(Router);
   readonly selectedProject = inject(SelectedProjectService);
 

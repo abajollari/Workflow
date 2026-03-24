@@ -1,3 +1,5 @@
+import type { IDbAdapter } from '../db/IDbAdapter.js';
+import { SqliteAdapter } from '../db/SqliteAdapter.js';
 import db from '../db/database.js';
 import { registry } from './ActivityHandlerRegistry.js';
 import { publishWorkflowEvent } from '../kafka/producer.js';
@@ -26,96 +28,105 @@ export interface Assignment {
 }
 
 export class WorkflowEngine {
+  constructor(private readonly db: IDbAdapter) {}
 
-  private logEvent(
+  private async logEvent(
     projectId: number,
     projectActivityId: number | null,
     eventType: string,
     activityId: string,
     opts?: { userId?: number; payload?: Record<string, unknown> }
-  ): void {
-    db.prepare(
+  ): Promise<void> {
+    await this.db.run(
       `INSERT INTO activity_event (projectId, projectActivityId, eventType, activityId, userId, payload)
-       VALUES (?, ?, ?, ?, ?, ?)`
-    ).run(
-      projectId,
-      projectActivityId ?? null,
-      eventType,
-      activityId,
-      opts?.userId ?? null,
-      opts?.payload ? JSON.stringify(opts.payload) : null
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [
+        projectId,
+        projectActivityId ?? null,
+        eventType,
+        activityId,
+        opts?.userId ?? null,
+        opts?.payload ? JSON.stringify(opts.payload) : null,
+      ]
     );
   }
 
-  initProject(projectId: number): ProjectActivity {
-    const existing = db
-      .prepare(
-        `SELECT * FROM project_activity WHERE projectId = ? AND activityId = 'start' AND status = 'active'`
-      )
-      .get(projectId) as ProjectActivity | undefined;
+  async initProject(projectId: number): Promise<ProjectActivity> {
+    const existing = await this.db.get<ProjectActivity>(
+      `SELECT * FROM project_activity WHERE projectId = ? AND activityId = 'start' AND status = 'active'`,
+      [projectId]
+    );
     if (existing) return existing;
 
-    this.activateActivity(projectId, 'start');
-    this.completeActivity(projectId, 'start', { outcome: 'success' });
+    await this.activateActivity(projectId, 'start');
+    await this.completeActivity(projectId, 'start', { outcome: 'success' });
 
-    const active = db
-      .prepare(`SELECT * FROM project_activity WHERE projectId = ? AND status = 'active' ORDER BY startedAt DESC LIMIT 1`)
-      .get(projectId) as ProjectActivity;
-    return active;
+    const active = await this.db.get<ProjectActivity>(
+      `SELECT * FROM project_activity WHERE projectId = ? AND status = 'active' ORDER BY startedAt DESC LIMIT 1`,
+      [projectId]
+    );
+    return active!;
   }
 
-  completeActivity(
+  async completeActivity(
     projectId: number,
     activityKey: string,
     opts?: { outcome?: string; userId?: number; notes?: string; output?: Record<string, unknown> }
-  ): ProjectActivity[] {
-    const activity = db
-      .prepare(
-        `SELECT * FROM project_activity WHERE projectId = ? AND activityId = ? AND status = 'active' LIMIT 1`
-      )
-      .get(projectId, activityKey) as ProjectActivity | undefined;
+  ): Promise<ProjectActivity[]> {
+    const activity = await this.db.get<ProjectActivity>(
+      `SELECT * FROM project_activity WHERE projectId = ? AND activityId = ? AND status = 'active' LIMIT 1`,
+      [projectId, activityKey]
+    );
 
     if (!activity) {
       throw new Error(`No active activity '${activityKey}' for project ${projectId}`);
     }
 
-    db.prepare(
+    await this.db.run(
       `UPDATE project_activity
-       SET status = 'completed', decisionOutcome = ?, completedAt = datetime('now'),
-           output = ?
-       WHERE id = ?`
-    ).run(opts?.outcome ?? null, opts?.output ? JSON.stringify(opts.output) : null, activity.id);
+       SET status = 'completed', decisionOutcome = ?, completedAt = datetime('now'), output = ?
+       WHERE id = ?`,
+      [opts?.outcome ?? null, opts?.output ? JSON.stringify(opts.output) : null, activity.id]
+    );
 
     if (opts?.userId) {
-      db.prepare(
+      await this.db.run(
         `UPDATE assignment
          SET completedAt = datetime('now'), notes = ?
-         WHERE projectActivityId = ? AND userId = ? AND completedAt IS NULL`
-      ).run(opts.notes ?? null, activity.id, opts.userId);
+         WHERE projectActivityId = ? AND userId = ? AND completedAt IS NULL`,
+        [opts.notes ?? null, activity.id, opts.userId]
+      );
     }
 
-    this.logEvent(projectId, activity.id, 'activity.completed', activityKey, {
+    await this.logEvent(projectId, activity.id, 'activity.completed', activityKey, {
       userId: opts?.userId,
       payload: opts?.outcome ? { outcome: opts.outcome } : undefined,
     });
 
-    const transitions = this.resolveNextActivities(projectId, activityKey, opts?.outcome);
+    const transitions = await this.resolveNextActivities(projectId, activityKey, opts?.outcome);
     const newActivities: ProjectActivity[] = [];
 
     for (const t of transitions) {
       if (t.toActivityKey === 'parallel_join') {
-        if (!this.checkParallelJoin(projectId)) continue;
+        if (!(await this.checkParallelJoin(projectId))) continue;
       }
-      newActivities.push(this.activateActivity(projectId, t.toActivityKey));
+      newActivities.push(await this.activateActivity(projectId, t.toActivityKey));
     }
 
-    this.syncProjectActivity(projectId);
+    await this.syncProjectActivity(projectId);
+
+    const versionId = await this.getProjectVersion(projectId);
+    const activityDef = await this.db.get<{ label: string }>(
+      'SELECT label FROM activity_definition WHERE activityKey = ? AND versionId = ?',
+      [activityKey, versionId]
+    );
 
     // Single canonical publish — no route should call publishWorkflowEvent separately
     publishWorkflowEvent({
       type: 'activity.completed',
       projectId,
       activityId: activityKey,
+      activityLabel: activityDef?.label ?? activityKey,
       activatedActivities: newActivities.map((a) => a.activityId),
       timestamp: new Date().toISOString(),
     }).catch((err) => console.error('[engine] failed to publish workflow event:', err));
@@ -123,156 +134,164 @@ export class WorkflowEngine {
     return newActivities;
   }
 
-  getActiveActivities(projectId: number): ProjectActivity[] {
-    return db
-      .prepare(`SELECT * FROM project_activity WHERE projectId = ? AND status = 'active'`)
-      .all(projectId) as ProjectActivity[];
+  async getActiveActivities(projectId: number): Promise<ProjectActivity[]> {
+    return this.db.all<ProjectActivity>(
+      `SELECT * FROM project_activity WHERE projectId = ? AND status = 'active'`,
+      [projectId]
+    );
   }
 
-  getClaimableActivities(projectId: number, userId: number): ProjectActivity[] {
-    const user = db
-      .prepare('SELECT * FROM user WHERE id = ?')
-      .get(userId) as { teamId: number } | undefined;
+  async getClaimableActivities(projectId: number, userId: number): Promise<ProjectActivity[]> {
+    const user = await this.db.get<{ teamId: number }>(
+      'SELECT * FROM user WHERE id = ?',
+      [userId]
+    );
     if (!user) return [];
 
-    return db
-      .prepare(
-        `SELECT ps.* FROM project_activity ps
-         JOIN project p ON p.id = ps.projectId
-         JOIN activity_definition ad ON ad.activityKey = ps.activityId AND ad.versionId = p.workflowVersionId
-         WHERE ps.projectId = ? AND ps.status = 'active' AND ad.teamId = ?`
-      )
-      .all(projectId, user.teamId) as ProjectActivity[];
+    return this.db.all<ProjectActivity>(
+      `SELECT ps.* FROM project_activity ps
+       JOIN project p ON p.id = ps.projectId
+       JOIN activity_definition ad ON ad.activityKey = ps.activityId AND ad.versionId = p.workflowVersionId
+       WHERE ps.projectId = ? AND ps.status = 'active' AND ad.teamId = ?`,
+      [projectId, user.teamId]
+    );
   }
 
-  assignUser(projectActivityId: number, userId: number): Assignment {
-    const activity = db
-      .prepare('SELECT * FROM project_activity WHERE id = ?')
-      .get(projectActivityId) as ProjectActivity | undefined;
+  async assignUser(projectActivityId: number, userId: number): Promise<Assignment> {
+    const activity = await this.db.get<ProjectActivity>(
+      'SELECT * FROM project_activity WHERE id = ?',
+      [projectActivityId]
+    );
     if (!activity) throw new Error('Project activity not found');
 
-    const versionId = this.getProjectVersion(activity.projectId);
-    const activityDef = db
-      .prepare('SELECT * FROM activity_definition WHERE activityKey = ? AND versionId = ?')
-      .get(activity.activityId, versionId) as { teamId: number | null } | undefined;
+    const versionId = await this.getProjectVersion(activity.projectId);
+    const activityDef = await this.db.get<{ teamId: number | null }>(
+      'SELECT * FROM activity_definition WHERE activityKey = ? AND versionId = ?',
+      [activity.activityId, versionId]
+    );
     if (!activityDef) throw new Error('Activity definition not found');
 
-    const user = db
-      .prepare('SELECT * FROM user WHERE id = ?')
-      .get(userId) as { teamId: number } | undefined;
+    const user = await this.db.get<{ teamId: number }>(
+      'SELECT * FROM user WHERE id = ?',
+      [userId]
+    );
     if (!user) throw new Error('User not found');
 
     if (activityDef.teamId !== null && activityDef.teamId !== user.teamId) {
       throw new Error("User's team does not own this activity");
     }
 
-    const result = db
-      .prepare(`INSERT INTO assignment (projectActivityId, userId) VALUES (?, ?)`)
-      .run(projectActivityId, userId);
+    const result = await this.db.run(
+      `INSERT INTO assignment (projectActivityId, userId) VALUES (?, ?)`,
+      [projectActivityId, userId]
+    );
 
-    const assignment = db
-      .prepare('SELECT * FROM assignment WHERE id = ?')
-      .get(result.lastInsertRowid) as Assignment;
+    const assignment = await this.db.get<Assignment>(
+      'SELECT * FROM assignment WHERE id = ?',
+      [result.lastInsertRowid]
+    );
 
-    this.logEvent(activity.projectId, activity.id, 'user.assigned', activity.activityId, {
+    await this.logEvent(activity.projectId, activity.id, 'user.assigned', activity.activityId, {
       userId,
-      payload: { assignmentId: assignment.id },
+      payload: { assignmentId: assignment!.id },
     });
 
-    return assignment;
+    return assignment!;
   }
 
-  private resolveNextActivities(
+  private async resolveNextActivities(
     projectId: number,
     activityKey: string,
     outcome?: string
-  ): { toActivityKey: string; edgeType: string }[] {
-    const versionId = this.getProjectVersion(projectId);
-    const activityDef = this.getActivityDef(activityKey, versionId);
+  ): Promise<{ toActivityKey: string; edgeType: string }[]> {
+    const versionId = await this.getProjectVersion(projectId);
+    const activityDef = await this.getActivityDef(activityKey, versionId);
 
     if (outcome) {
-      const conditional = db.prepare(`
-        SELECT ad.activityKey AS toActivityKey, t.edgeType
-        FROM activity_transition t
-        JOIN activity_definition ad ON ad.id = t.toActivityId
-        WHERE t.fromActivityId = ? AND t.condition = ?`)
-        .all(activityDef.id, outcome) as { toActivityKey: string; edgeType: string }[];
+      const conditional = await this.db.all<{ toActivityKey: string; edgeType: string }>(
+        `SELECT ad.activityKey AS toActivityKey, t.edgeType
+         FROM activity_transition t
+         JOIN activity_definition ad ON ad.id = t.toActivityId
+         WHERE t.fromActivityId = ? AND t.condition = ?`,
+        [activityDef.id, outcome]
+      );
       if (conditional.length > 0) return conditional;
     }
 
-    return db.prepare(`
-      SELECT ad.activityKey AS toActivityKey, t.edgeType
-      FROM activity_transition t
-      JOIN activity_definition ad ON ad.id = t.toActivityId
-      WHERE t.fromActivityId = ? AND t.condition IS NULL`)
-      .all(activityDef.id) as { toActivityKey: string; edgeType: string }[];
+    return this.db.all<{ toActivityKey: string; edgeType: string }>(
+      `SELECT ad.activityKey AS toActivityKey, t.edgeType
+       FROM activity_transition t
+       JOIN activity_definition ad ON ad.id = t.toActivityId
+       WHERE t.fromActivityId = ? AND t.condition IS NULL`,
+      [activityDef.id]
+    );
   }
 
-  activateActivityPublic(projectId: number, activityKey: string): ProjectActivity {
+  async activateActivityPublic(projectId: number, activityKey: string): Promise<ProjectActivity> {
     return this.activateActivity(projectId, activityKey);
   }
 
-  private activateActivity(projectId: number, activityKey: string): ProjectActivity {
-    const active = db
-      .prepare(
-        `SELECT * FROM project_activity WHERE projectId = ? AND activityId = ? AND status = 'active'`
-      )
-      .get(projectId, activityKey) as ProjectActivity | undefined;
+  private async activateActivity(projectId: number, activityKey: string): Promise<ProjectActivity> {
+    const active = await this.db.get<ProjectActivity>(
+      `SELECT * FROM project_activity WHERE projectId = ? AND activityId = ? AND status = 'active'`,
+      [projectId, activityKey]
+    );
     if (active) return active;
 
-    const lastCompleted = db
-      .prepare(
-        `SELECT MAX(iterationCount) as maxIter FROM project_activity
-         WHERE projectId = ? AND activityId = ? AND status = 'completed'`
-      )
-      .get(projectId, activityKey) as { maxIter: number | null };
+    const lastCompleted = await this.db.get<{ maxIter: number | null }>(
+      `SELECT MAX(iterationCount) as maxIter FROM project_activity
+       WHERE projectId = ? AND activityId = ? AND status = 'completed'`,
+      [projectId, activityKey]
+    );
 
-    const iterationCount = lastCompleted.maxIter !== null ? lastCompleted.maxIter + 1 : 0;
+    const iterationCount = lastCompleted?.maxIter != null ? lastCompleted.maxIter + 1 : 0;
 
-    const result = db
-      .prepare(
-        `INSERT INTO project_activity (projectId, activityId, status, iterationCount, startedAt)
-         VALUES (?, ?, 'active', ?, datetime('now'))`
-      )
-      .run(projectId, activityKey, iterationCount);
+    const result = await this.db.run(
+      `INSERT INTO project_activity (projectId, activityId, status, iterationCount, startedAt)
+       VALUES (?, ?, 'active', ?, datetime('now'))`,
+      [projectId, activityKey, iterationCount]
+    );
 
     const projectActivityId = result.lastInsertRowid;
 
-    const versionId = this.getProjectVersion(projectId);
-    const activityDef = this.getActivityDefSafe(activityKey, versionId);
+    const versionId = await this.getProjectVersion(projectId);
+    const activityDef = await this.getActivityDefSafe(activityKey, versionId);
     if (activityDef) {
-      db.prepare(
+      await this.db.run(
         `INSERT INTO project_activity_task (projectActivityId, activityTaskId)
-         SELECT ?, id FROM activity_task WHERE activityDefId = ?`
-      ).run(projectActivityId, activityDef.id);
+         SELECT ?, id FROM activity_task WHERE activityDefId = ?`,
+        [projectActivityId, activityDef.id]
+      );
     }
 
-    const newActivity = db
-      .prepare('SELECT * FROM project_activity WHERE id = ?')
-      .get(projectActivityId) as ProjectActivity;
+    const newActivity = await this.db.get<ProjectActivity>(
+      'SELECT * FROM project_activity WHERE id = ?',
+      [projectActivityId]
+    );
 
-    this.logEvent(projectId, newActivity.id, 'activity.activated', activityKey);
+    await this.logEvent(projectId, newActivity!.id, 'activity.activated', activityKey);
 
     if (activityDef?.actionType === 'automated') {
-      this.runHandler(projectId, activityKey, newActivity.id, versionId, activityDef.handler, null);
+      this.runHandler(projectId, activityKey, newActivity!.id, versionId, activityDef.handler, null);
     }
 
-    return newActivity;
+    return newActivity!;
   }
 
-  triggerActivity(
+  async triggerActivity(
     projectId: number,
     activityKey: string,
     configOverride?: Record<string, unknown>,
-  ): void {
-    const versionId = this.getProjectVersion(projectId);
-    const activityDef = this.getActivityDefSafe(activityKey, versionId);
+  ): Promise<void> {
+    const versionId = await this.getProjectVersion(projectId);
+    const activityDef = await this.getActivityDefSafe(activityKey, versionId);
 
     if (!activityDef) throw new Error(`Activity '${activityKey}' not found`);
 
-    const activity = db
-      .prepare(`SELECT * FROM project_activity WHERE projectId = ? AND activityId = ? AND status = 'active'`)
-      .get(projectId, activityKey) as ProjectActivity | undefined;
+    const activity = await this.db.get<ProjectActivity>(
+      `SELECT * FROM project_activity WHERE projectId = ? AND activityId = ? AND status = 'active'`,
+      [projectId, activityKey]
+    );
     if (!activity) throw new Error(`No active activity '${activityKey}' for project ${projectId}`);
 
     const configJson = configOverride && Object.keys(configOverride).length > 0
@@ -280,12 +299,16 @@ export class WorkflowEngine {
       : null;
 
     if (configJson) {
-      db.prepare(`UPDATE project_activity SET input = ? WHERE id = ?`).run(configJson, activity.id);
+      await this.db.run(
+        `UPDATE project_activity SET input = ? WHERE id = ?`,
+        [configJson, activity.id]
+      );
     }
+
     if (activityDef.handler) {
       this.runHandler(projectId, activityKey, activity.id, versionId, activityDef.handler, configJson);
     } else {
-      this.completeActivity(projectId, activityKey, { outcome: 'success' });
+      await this.completeActivity(projectId, activityKey, { outcome: 'success' });
     }
   }
 
@@ -301,7 +324,7 @@ export class WorkflowEngine {
       console.warn(`[engine] no handler for activity '${activityKey}' — skipping`);
       return;
     }
-    const input_data = inputJson ? JSON.parse(inputJson) as Record<string, unknown> : null;
+    const inputData = inputJson ? JSON.parse(inputJson) as Record<string, unknown> : null;
 
     const handler = registry.get(handlerName);
     if (!handler) {
@@ -309,13 +332,11 @@ export class WorkflowEngine {
       return;
     }
 
-    handler({ projectId, activityKey, projectActivityId, versionId, inputData: input_data })
-      .then((result) => {
-        this.completeActivity(projectId, activityKey, {
-          outcome: result.outcome,
-          output:  result.payload,
-        });
-      })
+    handler({ projectId, activityKey, projectActivityId, versionId, inputData })
+      .then((result) => this.completeActivity(projectId, activityKey, {
+        outcome: result.outcome,
+        output: result.payload,
+      }))
       .catch((err: Error) => {
         console.error(`[engine] handler '${handlerName}' failed for '${activityKey}':`, err.message);
         this.logEvent(projectId, projectActivityId, 'activity.completed', activityKey, {
@@ -324,74 +345,76 @@ export class WorkflowEngine {
       });
   }
 
-  private checkParallelJoin(projectId: number): boolean {
-    const versionId = this.getProjectVersion(projectId);
-    const parallelJoinDef = db
-      .prepare(
-        `SELECT id FROM activity_definition WHERE activityKey = 'parallel_join' AND versionId = ?`
-      )
-      .get(versionId) as { id: number } | undefined;
+  private async checkParallelJoin(projectId: number): Promise<boolean> {
+    const versionId = await this.getProjectVersion(projectId);
+    const parallelJoinDef = await this.db.get<{ id: number }>(
+      `SELECT id FROM activity_definition WHERE activityKey = 'parallel_join' AND versionId = ?`,
+      [versionId]
+    );
 
     if (!parallelJoinDef) return false;
 
-    const incomingActivities = db
-      .prepare(
-        `SELECT ad.activityKey FROM activity_transition t
-         JOIN activity_definition ad ON ad.id = t.fromActivityId
-         WHERE t.toActivityId = ?`
-      )
-      .all(parallelJoinDef.id) as { activityKey: string }[];
+    const incomingActivities = await this.db.all<{ activityKey: string }>(
+      `SELECT ad.activityKey FROM activity_transition t
+       JOIN activity_definition ad ON ad.id = t.fromActivityId
+       WHERE t.toActivityId = ?`,
+      [parallelJoinDef.id]
+    );
 
     for (const { activityKey } of incomingActivities) {
-      const completed = db
-        .prepare(
-          `SELECT COUNT(*) as count FROM project_activity
-           WHERE projectId = ? AND activityId = ? AND status = 'completed'`
-        )
-        .get(projectId, activityKey) as { count: number };
-      if (completed.count === 0) return false;
+      const completed = await this.db.get<{ count: number }>(
+        `SELECT COUNT(*) as count FROM project_activity
+         WHERE projectId = ? AND activityId = ? AND status = 'completed'`,
+        [projectId, activityKey]
+      );
+      if (!completed || completed.count === 0) return false;
     }
     return true;
   }
 
-  private syncProjectActivity(projectId: number): void {
-    const activeActivity = db
-      .prepare(
-        `SELECT activityId FROM project_activity
-         WHERE projectId = ? AND status = 'active'
-         ORDER BY startedAt DESC LIMIT 1`
-      )
-      .get(projectId) as { activityId: string } | undefined;
+  private async syncProjectActivity(projectId: number): Promise<void> {
+    const activeActivity = await this.db.get<{ activityId: string }>(
+      `SELECT activityId FROM project_activity
+       WHERE projectId = ? AND status = 'active'
+       ORDER BY startedAt DESC LIMIT 1`,
+      [projectId]
+    );
 
     if (activeActivity) {
-      db.prepare(`UPDATE project SET activity = ?, updatedAt = datetime('now') WHERE id = ?`).run(
-        activeActivity.activityId,
-        projectId
+      await this.db.run(
+        `UPDATE project SET activity = ?, updatedAt = datetime('now') WHERE id = ?`,
+        [activeActivity.activityId, projectId]
       );
     }
   }
 
-  private getProjectVersion(projectId: number): number {
-    const p = db
-      .prepare('SELECT workflowVersionId FROM project WHERE id = ?')
-      .get(projectId) as { workflowVersionId: number } | undefined;
+  private async getProjectVersion(projectId: number): Promise<number> {
+    const p = await this.db.get<{ workflowVersionId: number }>(
+      'SELECT workflowVersionId FROM project WHERE id = ?',
+      [projectId]
+    );
     if (!p) throw new Error(`Project ${projectId} not found`);
     return p.workflowVersionId;
   }
 
-  private getActivityDef(activityKey: string, versionId: number): { id: number } {
-    const def = db
-      .prepare('SELECT id FROM activity_definition WHERE activityKey = ? AND versionId = ?')
-      .get(activityKey, versionId) as { id: number } | undefined;
+  private async getActivityDef(activityKey: string, versionId: number): Promise<{ id: number }> {
+    const def = await this.db.get<{ id: number }>(
+      'SELECT id FROM activity_definition WHERE activityKey = ? AND versionId = ?',
+      [activityKey, versionId]
+    );
     if (!def) throw new Error(`Activity '${activityKey}' not found in version ${versionId}`);
     return def;
   }
 
-  private getActivityDefSafe(activityKey: string, versionId: number): { id: number; actionType: string; handler: string | null; inputSchema: string | null } | undefined {
-    return db
-      .prepare('SELECT id, actionType, handler, inputSchema FROM activity_definition WHERE activityKey = ? AND versionId = ?')
-      .get(activityKey, versionId) as { id: number; actionType: string; handler: string | null; inputSchema: string | null } | undefined;
+  private async getActivityDefSafe(
+    activityKey: string,
+    versionId: number
+  ): Promise<{ id: number; actionType: string; handler: string | null; inputSchema: string | null } | undefined> {
+    return this.db.get<{ id: number; actionType: string; handler: string | null; inputSchema: string | null }>(
+      'SELECT id, actionType, handler, inputSchema FROM activity_definition WHERE activityKey = ? AND versionId = ?',
+      [activityKey, versionId]
+    );
   }
 }
 
-export const workflowEngine = new WorkflowEngine();
+export const workflowEngine = new WorkflowEngine(new SqliteAdapter(db));

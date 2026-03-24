@@ -14,8 +14,8 @@ import azureStorageRouter from './routes/azureStorage.js';
 import salesforceRouter from './routes/salesforce.js';
 import { initDb } from './db/initDb.js';
 import { registerAllHandlers } from './handlers/index.js';
-import { startWorkflowConsumer } from './kafka/consumer.js';
-import { addWorkflowSseClient, removeWorkflowSseClient, addGlobalSseClient, removeGlobalSseClient } from './kafka/events.js';
+import { startWorkflowConsumer, stopWorkflowConsumer } from './kafka/consumer.js';
+import { addWorkflowSseClient, removeWorkflowSseClient, addGlobalSseClient, removeGlobalSseClient, closeAllSseClients } from './kafka/events.js';
 
 const app = express();
 const PORT = process.env.PORT ?? 3001;
@@ -56,6 +56,7 @@ app.get('/api/workflow/stream', (req: Request, res: Response) => {
   res.flushHeaders();
 
   req.socket?.setNoDelay(true);
+  res.write('retry: 3000\n\n');
   res.write(': connected\n\n');
 
   addWorkflowSseClient(projectId, res);
@@ -76,6 +77,7 @@ app.get('/api/workflow/stream/global', (req: Request, res: Response) => {
   res.flushHeaders();
 
   req.socket?.setNoDelay(true);
+  res.write('retry: 3000\n\n');
   res.write(': connected\n\n');
 
   addGlobalSseClient(res);
@@ -87,6 +89,17 @@ app.get('/api/workflow/stream/global', (req: Request, res: Response) => {
   });
 });
 
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`[workflow-engine] running on http://localhost:${PORT}`);
 });
+
+async function shutdown(signal: string): Promise<void> {
+  console.log(`[workflow-engine] ${signal} received — shutting down gracefully`);
+  server.close();            // stop accepting new HTTP connections
+  closeAllSseClients();      // push close event to all SSE clients, free sockets
+  await stopWorkflowConsumer().catch(() => {}); // disconnect Kafka consumer
+  process.exit(0);
+}
+
+process.on('SIGTERM', () => { shutdown('SIGTERM').catch(console.error); });
+process.on('SIGINT',  () => { shutdown('SIGINT').catch(console.error); });

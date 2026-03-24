@@ -8,6 +8,7 @@ export interface AppNotification {
   read:                boolean;
   projectId:           number;
   activityId:          string;
+  activityLabel:       string;
   activatedActivities: string[];
 }
 
@@ -58,18 +59,21 @@ export class NotificationService {
     };
   }
 
-  private push(event: { type: string; projectId: number; activityId: string; activatedActivities: string[]; timestamp: string }): void {
+  private push(event: { type: string; projectId: number; activityId: string; activityLabel?: string; activatedActivities: string[]; timestamp: string }): void {
     const activated = event.activatedActivities?.length
       ? ` → ${event.activatedActivities.join(', ')}`
       : '';
 
+    const label = event.activityLabel ?? event.activityId;
+
     const n: AppNotification = {
       id:                  this.nextId++,
-      message:             `[Project ${event.projectId}] ${event.activityId} completed${activated}`,
+      message:             `[Project ${event.projectId}] ${label} completed${activated}`,
       timestamp:           event.timestamp,
       read:                false,
       projectId:           event.projectId,
       activityId:          event.activityId,
+      activityLabel:       label,
       activatedActivities: event.activatedActivities ?? [],
     };
 

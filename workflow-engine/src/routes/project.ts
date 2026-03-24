@@ -25,7 +25,7 @@ router.get('/:id', (req: Request, res: Response) => {
   res.json(project);
 });
 
-router.post('/', (req: Request, res: Response) => {
+router.post('/', async (req: Request, res: Response) => {
   const { accountNumber, accountName, activity = 'start' } = req.body;
 
   if (!accountNumber || !accountName || !activity) {
@@ -44,7 +44,7 @@ router.post('/', (req: Request, res: Response) => {
       .prepare('INSERT INTO project (accountNumber, accountName, activity, workflowVersionId) VALUES (?, ?, ?, ?)')
       .run(accountNumber, accountName, activity, versionId);
     const projectId = result.lastInsertRowid as number;
-    workflowEngine.initProject(projectId);
+    await workflowEngine.initProject(projectId);
     const created = db.prepare('SELECT * FROM project WHERE id = ?').get(projectId);
     res.status(201).json(created);
   } catch (err: any) {

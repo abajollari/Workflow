@@ -771,7 +771,7 @@ export class WorkflowGraphComponent implements OnInit, OnDestroy {
 
   setSelectedInProgress(): void {
     if (this.selectedProjectId === null || !this.selectedNodeId) return;
-    if (!confirm(`Set "${this.selectedNodeLabel}" as the active activity?`)) return;
+    // if (!confirm(`Set "${this.selectedNodeLabel}" as the active activity?`)) return;
     this.engine
       .post(`/api/projects/${this.selectedProjectId}/activities/${this.selectedNodeId}/set-active`)
       .subscribe({
@@ -782,7 +782,7 @@ export class WorkflowGraphComponent implements OnInit, OnDestroy {
 
   markSelectedComplete(): void {
     if (this.selectedProjectId === null || !this.selectedNodeId) return;
-    if (!confirm(`Mark "${this.selectedNodeLabel}" as completed?`)) return;
+    // if (!confirm(`Mark "${this.selectedNodeLabel}" as completed?`)) return;
     this.engine
       .post(`/api/projects/${this.selectedProjectId}/activities/${this.selectedNodeId}/complete`)
       .subscribe(() => this.onActivityCompleted());

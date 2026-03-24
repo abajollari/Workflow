@@ -79,26 +79,6 @@ import { EngineApiService } from '../../services/engine-api.service';
               </svg>
               <span class="notif-badge" *ngIf="notif.unreadCount() > 0">{{ notif.unreadCount() }}</span>
             </button>
-
-            <!-- Notifications popup -->
-            <div class="notif-popup" *ngIf="notifOpen">
-              <div class="notif-header">
-                <span class="notif-title">Notifications</span>
-                <button class="notif-clear" (click)="notif.clear()" *ngIf="notif.notifications().length > 0">Clear</button>
-              </div>
-              <div class="notif-empty" *ngIf="notif.notifications().length === 0">
-                No notifications yet
-              </div>
-              <div class="notif-list" *ngIf="notif.notifications().length > 0">
-                <div class="notif-item" *ngFor="let n of notif.notifications()" [class.unread]="!n.read">
-                  <span class="notif-dot" *ngIf="!n.read"></span>
-                  <div class="notif-content">
-                    <span class="notif-msg">{{ n.message }}</span>
-                    <span class="notif-time">{{ n.timestamp | date:'HH:mm:ss' }}</span>
-                  </div>
-                </div>
-              </div>
-            </div>
           </div>
 
           <button class="avatar-btn" title="User profile">
@@ -107,6 +87,27 @@ import { EngineApiService } from '../../services/engine-api.service';
         </div>
       </div>
     </header>
+
+    <!-- Notifications popup — must be outside <header> so its z-index:300 is in the root
+         stacking context, above the backdrop's z-index:299 -->
+    <div class="notif-popup" *ngIf="notifOpen">
+      <div class="notif-header">
+        <span class="notif-title">Notifications</span>
+        <button class="notif-clear" (click)="notif.clear()" *ngIf="notif.notifications().length > 0">Clear</button>
+      </div>
+      <div class="notif-empty" *ngIf="notif.notifications().length === 0">
+        No notifications yet
+      </div>
+      <div class="notif-list" *ngIf="notif.notifications().length > 0">
+        <div class="notif-item" *ngFor="let n of notif.notifications()" [class.unread]="!n.read">
+          <span class="notif-dot" *ngIf="!n.read"></span>
+          <div class="notif-content">
+            <span class="notif-msg">{{ n.message }}</span>
+            <span class="notif-time">{{ n.timestamp | date:'HH:mm:ss' }}</span>
+          </div>
+        </div>
+      </div>
+    </div>
 
     <!-- Notification backdrop (invisible, closes popup) -->
     <div class="notif-backdrop" *ngIf="notifOpen" (click)="closeNotif()"></div>

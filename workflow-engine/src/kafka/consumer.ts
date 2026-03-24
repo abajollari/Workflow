@@ -1,5 +1,6 @@
 import kafka from './client.js';
 import { broadcastWorkflowEvent, type WorkflowEvent } from './events.js';
+import { redisPub } from '../redis/client.js';
 
 const admin = kafka.admin();
 const consumer = kafka.consumer({
@@ -18,6 +19,11 @@ async function ensureTopicExists(topic: string): Promise<void> {
   await admin.disconnect();
 }
 
+export async function stopWorkflowConsumer(): Promise<void> {
+  await consumer.disconnect();
+  console.log('[kafka] workflow consumer disconnected');
+}
+
 export async function startWorkflowConsumer(): Promise<void> {
   await new Promise<void>((r) => setTimeout(r, 4500));
 
@@ -34,7 +40,13 @@ export async function startWorkflowConsumer(): Promise<void> {
       try {
         const event = JSON.parse(message.value.toString()) as WorkflowEvent;
         console.log(`[kafka] consumed ${event.type} for project ${event.projectId}`);
-        broadcastWorkflowEvent(event);
+        if (redisPub) {
+          // Fan-out via Redis so ALL process instances broadcast to their local SSE clients
+          await redisPub.publish('workflow-events', message.value.toString());
+        } else {
+          // Single-instance fallback: broadcast directly
+          broadcastWorkflowEvent(event);
+        }
       } catch {
         console.error('[kafka] failed to parse workflow event');
       }

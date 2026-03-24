@@ -19,7 +19,7 @@ function isValidActivity(activityKey: string, versionId: number): boolean {
 }
 
 // POST /api/salesforce/start
-router.post('/start', (req: Request, res: Response) => {
+router.post('/start', async (req: Request, res: Response) => {
   const { accountNumber, accountName, activity = 'start', outcome = 'success' } = req.body;
 
   if (!accountNumber || !accountName) {
@@ -27,6 +27,7 @@ router.post('/start', (req: Request, res: Response) => {
     return;
   }
 
+  const firstActivity = 'pqr_created'; //after 'start'
   const versionId = getActiveVersionId();
   if (!isValidActivity(activity, versionId)) {
     res.status(400).json({ error: `Invalid activity: '${activity}'` });
@@ -47,10 +48,10 @@ router.post('/start', (req: Request, res: Response) => {
       .prepare('INSERT INTO project (accountNumber, accountName, activity, workflowVersionId) VALUES (?, ?, ?, ?)')
       .run(accountNumber, accountName, activity, versionId);
     const projectId = result.lastInsertRowid as number;
-    workflowEngine.initProject(projectId);
+    await workflowEngine.initProject(projectId);
     const created = db.prepare('SELECT * FROM project WHERE id = ?').get(projectId);
 
-    workflowEngine.completeActivity(projectId, 'pqr_created', { outcome: 'success', output: req.body });
+    await workflowEngine.completeActivity(projectId, firstActivity, { outcome: 'success', output: req.body });
 
     res.status(201).json(created);
   } catch (err: any) {
@@ -63,7 +64,7 @@ router.post('/start', (req: Request, res: Response) => {
 });
 
 // POST /api/salesforce/submit/:accountNumber
-router.post('/submit/:accountNumber', (req: Request, res: Response) => {
+router.post('/submit/:accountNumber', async (req: Request, res: Response) => {
   const { accountNumber } = req.params;
   const payload = req.body;
 
@@ -72,6 +73,7 @@ router.post('/submit/:accountNumber', (req: Request, res: Response) => {
     return;
   }
 
+  const activityName = 'pqr_submitted';
   console.log('[salesforce] received data:', JSON.stringify(payload));
   const project = db
     .prepare('SELECT * FROM project WHERE accountNumber = ?')
@@ -82,7 +84,7 @@ router.post('/submit/:accountNumber', (req: Request, res: Response) => {
     return;
   }
 
-  workflowEngine.completeActivity(project.id, 'pqr_submitted', { outcome: 'success', output: req.body });
+  await workflowEngine.completeActivity(project.id, activityName, { outcome: 'success', output: req.body });
 
   res.json({ status: 'received', data: payload });
 });

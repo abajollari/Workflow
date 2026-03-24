@@ -40,7 +40,7 @@ router.get('/:id/activities', (req: Request, res: Response) => {
 });
 
 // POST /api/projects/:id/activities/:activityId/complete
-router.post('/:id/activities/:activityId/complete', (req: Request, res: Response) => {
+router.post('/:id/activities/:activityId/complete', async (req: Request, res: Response) => {
   const projectId = Number(req.params.id);
   const { activityId } = req.params as { activityId: string };
   const { outcome, userId, notes } = req.body ?? {};
@@ -50,7 +50,7 @@ router.post('/:id/activities/:activityId/complete', (req: Request, res: Response
 
   try {
     // workflowEngine.completeActivity already publishes the Kafka event internally
-    const activated = workflowEngine.completeActivity(projectId, activityId, { outcome, userId, notes });
+    const activated = await workflowEngine.completeActivity(projectId, activityId, { outcome, userId, notes });
     res.json({ activated });
   } catch (err: any) {
     res.status(400).json({ error: err.message });
@@ -58,7 +58,7 @@ router.post('/:id/activities/:activityId/complete', (req: Request, res: Response
 });
 
 // POST /api/projects/:id/activities/:activityId/set-active
-router.post('/:id/activities/:activityId/set-active', (req: Request, res: Response) => {
+router.post('/:id/activities/:activityId/set-active', async (req: Request, res: Response) => {
   const projectId = Number(req.params.id);
   const { activityId } = req.params as { activityId: string };
 
@@ -90,7 +90,7 @@ router.post('/:id/activities/:activityId/set-active', (req: Request, res: Respon
        WHERE projectId = ? AND activityId IN (${placeholders}) AND status IN ('active', 'completed')`
     ).run(projectId, ...[...forwardKeys]);
 
-    const activated = workflowEngine.activateActivityPublic(projectId, activityId);
+    const activated = await workflowEngine.activateActivityPublic(projectId, activityId);
     db.prepare(`UPDATE project SET activity = ?, updatedAt = datetime('now') WHERE id = ?`).run(activityId, projectId);
     res.json(activated);
   } catch (err: any) {
@@ -100,7 +100,7 @@ router.post('/:id/activities/:activityId/set-active', (req: Request, res: Respon
 });
 
 // POST /api/projects/:id/activities/:activityId/reject
-router.post('/:id/activities/:activityId/reject', (req: Request, res: Response) => {
+router.post('/:id/activities/:activityId/reject', async (req: Request, res: Response) => {
   const projectId = Number(req.params.id);
   const { activityId } = req.params as { activityId: string };
   const { notes } = req.body ?? {};
@@ -112,10 +112,10 @@ router.post('/:id/activities/:activityId/reject', (req: Request, res: Response) 
     const existing = db
       .prepare(`SELECT id FROM project_activity WHERE projectId = ? AND activityId = ? AND status IN ('active', 'completed')`)
       .get(projectId, activityId);
-    if (!existing) workflowEngine.activateActivityPublic(projectId, activityId);
+    if (!existing) await workflowEngine.activateActivityPublic(projectId, activityId);
 
     // workflowEngine.completeActivity publishes Kafka event internally
-    const activated = workflowEngine.completeActivity(projectId, activityId, { outcome: 'no', notes });
+    const activated = await workflowEngine.completeActivity(projectId, activityId, { outcome: 'no', notes });
     res.json({ activated });
   } catch (err: any) {
     console.error('[reject]', err.message);
@@ -124,7 +124,7 @@ router.post('/:id/activities/:activityId/reject', (req: Request, res: Response) 
 });
 
 // POST /api/projects/:id/activities/:activityId/trigger
-router.post('/:id/activities/:activityId/trigger', (req: Request, res: Response) => {
+router.post('/:id/activities/:activityId/trigger', async (req: Request, res: Response) => {
   const projectId = Number(req.params.id);
   const { activityId } = req.params;
 
@@ -135,7 +135,7 @@ router.post('/:id/activities/:activityId/trigger', (req: Request, res: Response)
     const override = req.body && typeof req.body === 'object' && Object.keys(req.body).length > 0
       ? req.body as Record<string, unknown>
       : undefined;
-    workflowEngine.triggerActivity(projectId, activityId, override);
+    await workflowEngine.triggerActivity(projectId, activityId, override);
     res.status(202).json({ status: 'triggered' });
   } catch (err: any) {
     res.status(400).json({ error: err.message });
@@ -143,7 +143,7 @@ router.post('/:id/activities/:activityId/trigger', (req: Request, res: Response)
 });
 
 // POST /api/projects/:id/activities/:activityId/assign
-router.post('/:id/activities/:activityId/assign', (req: Request, res: Response) => {
+router.post('/:id/activities/:activityId/assign', async (req: Request, res: Response) => {
   const projectId = Number(req.params.id);
   const { activityId } = req.params;
   const { userId } = req.body ?? {};
@@ -156,7 +156,7 @@ router.post('/:id/activities/:activityId/assign', (req: Request, res: Response) 
   if (!projectActivity) { res.status(404).json({ error: 'No active activity found' }); return; }
 
   try {
-    const assignment = workflowEngine.assignUser(projectActivity.id, Number(userId));
+    const assignment = await workflowEngine.assignUser(projectActivity.id, Number(userId));
     res.status(201).json(assignment);
   } catch (err: any) {
     res.status(400).json({ error: err.message });

@@ -1,0 +1,181 @@
+
+  # Create new project
+  ng new my-new-app --standalone --routing --style=css
+  cd my-new-app
+
+  # Copy only the docs
+  cp /path/to/workflow-app/README.md .
+  cp -r /path/to/workflow-app/docs .
+
+  Then use those files as your blueprint to build from scratch — either manually or by feeding each doc section to Claude as a prompt.   
+
+  One thing worth noting: the docs I generated describe the current app. If your new project has different requirements, update the docs 
+  first before building — treat them as a living spec, not a frozen snapshot. That's the real value: you can edit docs/models.md to add a
+   new interface, or docs/api-reference.md to add an endpoint, and then build to that updated spec.
+
+
+     ┌──────────────────┬──────────────────────────────────────────────────┬────────────────────────────────┐
+  │                  │                     Frontend                     │            Backend             │
+  ├──────────────────┼──────────────────────────────────────────────────┼────────────────────────────────┤
+  │ Scaffold         │ ng new my-app --standalone --routing --style=css │ mkdir my-engine && npm init -y │
+  ├──────────────────┼──────────────────────────────────────────────────┼────────────────────────────────┤
+  │ Copy docs        │ cp README.md + docs/                             │ cp README.md + docs/           │
+  ├──────────────────┼──────────────────────────────────────────────────┼────────────────────────────────┤
+  │ First build step │ From docs/models.md                              │ From docs/database-schema.md 
+
+
+    Prompt: Frontend example for first step: 
+    Build src/app/models/workflow.model.ts for an Angular 17 TypeScript project. (paste docs/models.md)
+
+    ==============ALL STEPS=================
+    Here's the full build sequence for both projects with prompts:                                                                         
+  
+  Frontend (workflow-app)                                                                                                                                                                                                                                                         
+  ┌─────┬────────────────────────────────┬───────────────────┬──────────────────────────────────────────────────────────────────────┐    
+  │  #  │              File              │    Doc Source     │                                Prompt                                │
+  ├─────┼────────────────────────────────┼───────────────────┼──────────────────────────────────────────────────────────────────────┤
+  │ 1   │ Scaffold                       │ README.md         │ ng new my-app --standalone --routing --style=css                     │    
+  ├─────┼────────────────────────────────┼───────────────────┼──────────────────────────────────────────────────────────────────────┤    
+  │ 2   │ Copy docs                      │ —                 │ cp README.md + cp -r docs/                                           │    
+  ├─────┼────────────────────────────────┼───────────────────┼──────────────────────────────────────────────────────────────────────┤    
+  │ 3   │ workflow.model.ts              │ models.md         │ "Build src/app/models/workflow.model.ts for Angular 17 TypeScript."  │    
+  │     │                                │                   │ + paste models.md                                                    │    
+  ├─────┼────────────────────────────────┼───────────────────┼──────────────────────────────────────────────────────────────────────┤    
+  │ 4   │ styles.css                     │ styling.md        │ "Build src/styles.css for an Angular 17 dark-themed app." + paste    │    
+  │     │                                │                   │ styling.md                                                           │    
+  ├─────┼────────────────────────────────┼───────────────────┼──────────────────────────────────────────────────────────────────────┤    
+  │ 5   │ EngineApiService               │ services.md       │ "Build engine-api.service.ts for Angular 17 standalone." + paste     │    
+  │     │                                │                   │ EngineApiService section                                             │    
+  ├─────┼────────────────────────────────┼───────────────────┼──────────────────────────────────────────────────────────────────────┤    
+  │ 6   │ SelectedProjectService         │ services.md       │ "Build selected-project.service.ts using Angular 17 signals." +      │    
+  │     │                                │                   │ paste SelectedProjectService section                                 │    
+  ├─────┼────────────────────────────────┼───────────────────┼──────────────────────────────────────────────────────────────────────┤    
+  │     │                                │ services.md +     │ "Build workflow-data.service.ts. EngineApiService and                │    
+  │ 7   │ WorkflowDataService            │ models.md         │ WorkflowNode/WorkflowEdge already exist." + paste                    │    
+  │     │                                │                   │ WorkflowDataService section                                          │    
+  ├─────┼────────────────────────────────┼───────────────────┼──────────────────────────────────────────────────────────────────────┤    
+  │ 8   │ WorkflowExecutionService       │ services.md +     │ "Build workflow-execution.service.ts using native EventSource inside │    
+  │     │                                │ models.md         │  NgZone." + paste section                                            │    
+  ├─────┼────────────────────────────────┼───────────────────┼──────────────────────────────────────────────────────────────────────┤    
+  │ 9   │ NotificationService            │ services.md       │ "Build notification.service.ts using Angular signals and             │    
+  │     │                                │                   │ localStorage." + paste section                                       │    
+  ├─────┼────────────────────────────────┼───────────────────┼──────────────────────────────────────────────────────────────────────┤    
+  │ 10  │ FooterComponent                │ components.md     │ "Build footer.component.ts as an Angular 17 standalone component." + │    
+  │     │                                │                   │  paste FooterComponent section                                       │    
+  ├─────┼────────────────────────────────┼───────────────────┼──────────────────────────────────────────────────────────────────────┤    
+  │     │                                │                   │ "Build header.component.ts. SelectedProjectService,                  │    
+  │ 11  │ HeaderComponent                │ components.md     │ NotificationService, EngineApiService already exist." + paste        │    
+  │     │                                │                   │ section                                                              │    
+  ├─────┼────────────────────────────────┼───────────────────┼──────────────────────────────────────────────────────────────────────┤    
+  │ 12  │ ActivityTasksComponent         │ components.md     │ "Build activity-tasks.component.ts. EngineApiService and InputField  │    
+  │     │                                │                   │ already exist." + paste section                                      │    
+  ├─────┼────────────────────────────────┼───────────────────┼──────────────────────────────────────────────────────────────────────┤    
+  │     │                                │                   │ "Build workflow-graph.component.ts. WorkflowDataService,             │    
+  │ 13  │ WorkflowGraphComponent         │ components.md     │ WorkflowExecutionService, ActivityTasksComponent already exist." +   │    
+  │     │                                │                   │ paste section                                                        │    
+  ├─────┼────────────────────────────────┼───────────────────┼──────────────────────────────────────────────────────────────────────┤    
+  │ 14  │ HomeComponent                  │ pages.md          │ "Build home.component.ts. SelectedProjectService and                 │    
+  │     │                                │                   │ WorkflowGraphComponent already exist." + paste HomeComponent section │    
+  ├─────┼────────────────────────────────┼───────────────────┼──────────────────────────────────────────────────────────────────────┤    
+  │ 15  │ ArtifactsComponent             │ pages.md          │ "Build artifacts.component.ts. EngineApiService and                  │    
+  │     │                                │                   │ SelectedProjectService already exist." + paste section               │    
+  ├─────┼────────────────────────────────┼───────────────────┼──────────────────────────────────────────────────────────────────────┤    
+  │ 16  │ WorkflowsComponent             │ pages.md          │ "Build workflows.component.ts. EngineApiService already exists." +   │    
+  │     │                                │                   │ paste section                                                        │    
+  ├─────┼────────────────────────────────┼───────────────────┼──────────────────────────────────────────────────────────────────────┤    
+  │ 17  │ WorkflowCreateComponent        │ pages.md          │ "Build workflow-create.component.ts. EngineApiService already        │    
+  │     │                                │                   │ exists." + paste section                                             │    
+  ├─────┼────────────────────────────────┼───────────────────┼──────────────────────────────────────────────────────────────────────┤    
+  │ 18  │ WorkflowEditComponent          │ pages.md          │ "Build workflow-edit.component.ts. Same wizard as                    │    
+  │     │                                │                   │ WorkflowCreateComponent but pre-populated." + paste section          │    
+  ├─────┼────────────────────────────────┼───────────────────┼──────────────────────────────────────────────────────────────────────┤    
+  │ 19  │ app.routes.ts +                │ architecture.md   │ "Wire up routing, root layout, and bootstrap for Angular 17          │    
+  │     │ app.component.ts + main.ts     │                   │ standalone. All components already exist." + paste architecture.md   │    
+  └─────┴────────────────────────────────┴───────────────────┴──────────────────────────────────────────────────────────────────────┘    
+
+  ---
+  Backend (workflow-engine)
+
+  ┌─────┬─────────────────────────────────────────┬───────────────────────┬─────────────────────────────────────────────────────────┐    
+  │  #  │                  File                   │      Doc Source       │                         Prompt                          │    
+  ├─────┼─────────────────────────────────────────┼───────────────────────┼─────────────────────────────────────────────────────────┤    
+  │ 1   │ Scaffold                                │ README.md             │ mkdir my-engine && npm init -y && npx tsc --init        │    
+  ├─────┼─────────────────────────────────────────┼───────────────────────┼─────────────────────────────────────────────────────────┤    
+  │ 2   │ Copy docs                               │ —                     │ cp README.md + cp -r docs/                              │    
+  ├─────┼─────────────────────────────────────────┼───────────────────────┼─────────────────────────────────────────────────────────┤    
+  │     │                                         │                       │ "Build the IDbAdapter interface and SqliteAdapter       │    
+  │ 3   │ IDbAdapter.ts + SqliteAdapter.ts        │ workflow-engine.md    │ implementation for better-sqlite3." + paste IDbAdapter  │    
+  │     │                                         │                       │ section                                                 │    
+  ├─────┼─────────────────────────────────────────┼───────────────────────┼─────────────────────────────────────────────────────────┤    
+  │     │                                         │                       │ "Build src/db/database.ts — SQLite connection with WAL  │    
+  │ 4   │ database.ts                             │ database-schema.md    │ mode and foreign keys." + paste intro of                │    
+  │     │                                         │                       │ database-schema.md                                      │    
+  ├─────┼─────────────────────────────────────────┼───────────────────────┼─────────────────────────────────────────────────────────┤    
+  │     │                                         │                       │ "Build src/db/initDb.ts — create all tables and seed    │    
+  │ 5   │ initDb.ts                               │ database-schema.md    │ data if not present." + paste all tables from           │    
+  │     │                                         │                       │ database-schema.md                                      │    
+  ├─────┼─────────────────────────────────────────┼───────────────────────┼─────────────────────────────────────────────────────────┤    
+  │     │                                         │                       │ "Build ActivityHandlerRegistry with HandlerContext,     │    
+  │ 6   │ ActivityHandlerRegistry.ts              │ workflow-engine.md    │ HandlerResult types and a Map-based registry." + paste  │    
+  │     │                                         │                       │ section                                                 │    
+  ├─────┼─────────────────────────────────────────┼───────────────────────┼─────────────────────────────────────────────────────────┤    
+  │     │                                         │                       │ "Build WorkflowEngine class. IDbAdapter,                │    
+  │ 7   │ WorkflowEngine.ts                       │ workflow-engine.md    │ ActivityHandlerRegistry already exist." + paste         │    
+  │     │                                         │                       │ workflow-engine.md                                      │    
+  ├─────┼─────────────────────────────────────────┼───────────────────────┼─────────────────────────────────────────────────────────┤    
+  │     │ Handlers (weatherHandler,               │                       │ "Build all activity handlers and registerAllHandlers(). │    
+  │ 8   │ sendProposalHandler, excelHandler,      │ handlers.md           │  ActivityHandlerRegistry already exists." + paste       │    
+  │     │ index.ts)                               │                       │ handlers.md                                             │    
+  ├─────┼─────────────────────────────────────────┼───────────────────────┼─────────────────────────────────────────────────────────┤    
+  │ 9   │ kafka/client.ts                         │ kafka-events.md       │ "Build the KafkaJS client singleton." + paste Kafka     │    
+  │     │                                         │                       │ Client section                                          │    
+  ├─────┼─────────────────────────────────────────┼───────────────────────┼─────────────────────────────────────────────────────────┤    
+  │ 10  │ kafka/events.ts + kafka/producer.ts     │ kafka-events.md       │ "Build WorkflowEvent type, SSE registry functions, and  │    
+  │     │                                         │                       │ publishWorkflowEvent()." + paste those sections         │    
+  ├─────┼─────────────────────────────────────────┼───────────────────────┼─────────────────────────────────────────────────────────┤    
+  │     │                                         │                       │ "Build startWorkflowConsumer() and                      │    
+  │ 11  │ kafka/consumer.ts                       │ kafka-events.md       │ stopWorkflowConsumer(). Producer and events already     │    
+  │     │                                         │                       │ exist." + paste Consumer section                        │    
+  ├─────┼─────────────────────────────────────────┼───────────────────────┼─────────────────────────────────────────────────────────┤    
+  │ 12  │ services/docusign.service.ts            │ integrations.md       │ "Build DocuSign service with getApiClient() and         │    
+  │     │                                         │                       │ sendEnvelopeFromTemplate()." + paste DocuSign section   │    
+  ├─────┼─────────────────────────────────────────┼───────────────────────┼─────────────────────────────────────────────────────────┤    
+  │ 13  │ services/azureStorage.service.ts        │ integrations.md       │ "Build Azure Blob Storage service with all listed       │    
+  │     │                                         │                       │ functions." + paste Azure section                       │    
+  ├─────┼─────────────────────────────────────────┼───────────────────────┼─────────────────────────────────────────────────────────┤    
+  │ 14  │ routes/health.ts + routes/teams.ts +    │ api-reference.md      │ "Build these three simple route files." + paste their   │    
+  │     │ routes/users.ts                         │                       │ sections from api-reference.md                          │    
+  ├─────┼─────────────────────────────────────────┼───────────────────────┼─────────────────────────────────────────────────────────┤    
+  │ 15  │ routes/project.ts                       │ api-reference.md      │ "Build project routes. WorkflowEngine already exists."  │    
+  │     │                                         │                       │ + paste Projects section                                │    
+  ├─────┼─────────────────────────────────────────┼───────────────────────┼─────────────────────────────────────────────────────────┤    
+  │ 16  │ routes/activities.ts                    │ api-reference.md      │ "Build activity routes. WorkflowEngine already exists." │    
+  │     │                                         │                       │  + paste Activities section                             │    
+  ├─────┼─────────────────────────────────────────┼───────────────────────┼─────────────────────────────────────────────────────────┤    
+  │ 17  │ routes/workflow.ts                      │ api-reference.md      │ "Build workflow definition routes with atomic           │    
+  │     │                                         │                       │ transactions." + paste Workflow Definitions section     │    
+  ├─────┼─────────────────────────────────────────┼───────────────────────┼─────────────────────────────────────────────────────────┤    
+  │ 18  │ routes/artifacts.ts                     │ api-reference.md      │ "Build artifact routes with Multer file upload (50MB    │    
+  │     │                                         │                       │ limit)." + paste Artifacts section                      │    
+  ├─────┼─────────────────────────────────────────┼───────────────────────┼─────────────────────────────────────────────────────────┤    
+  │ 19  │ routes/events.ts                        │ api-reference.md      │ "Build audit log route with optional filters." + paste  │    
+  │     │                                         │                       │ Audit Events section                                    │    
+  ├─────┼─────────────────────────────────────────┼───────────────────────┼─────────────────────────────────────────────────────────┤    
+  │ 20  │ routes/docusign.ts                      │ integrations.md +     │ "Build DocuSign routes. Service and WorkflowEngine      │    
+  │     │                                         │ api-reference.md      │ already exist." + paste both sections                   │    
+  ├─────┼─────────────────────────────────────────┼───────────────────────┼─────────────────────────────────────────────────────────┤    
+  │ 21  │ routes/azureStorage.ts                  │ integrations.md +     │ "Build Azure storage routes with Multer (100MB limit)." │    
+  │     │                                         │ api-reference.md      │  + paste both sections                                  │    
+  ├─────┼─────────────────────────────────────────┼───────────────────────┼─────────────────────────────────────────────────────────┤    
+  │ 22  │ routes/salesforce.ts                    │ integrations.md +     │ "Build Salesforce inbound routes. WorkflowEngine        │    
+  │     │                                         │ api-reference.md      │ already exists." + paste both sections                  │    
+  ├─────┼─────────────────────────────────────────┼───────────────────────┼─────────────────────────────────────────────────────────┤    
+  │     │                                         │                       │ "Build the Express app entry point — mount all routers, │    
+  │ 23  │ src/index.ts                            │ architecture.md       │  SSE endpoints, init DB, register handlers, start Kafka │    
+  │     │                                         │                       │  consumer, graceful shutdown." + paste architecture.md  │    
+  └─────┴─────────────────────────────────────────┴───────────────────────┴─────────────────────────────────────────────────────────┘    
+
+  ---
+  The key rule: always mention what already exists when writing the prompt for steps that have dependencies. That's the only extra       
+  context Claude needs beyond the doc section.
+  

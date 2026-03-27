@@ -82,6 +82,13 @@ export class WorkflowEngine {
       throw new Error(`No active activity '${activityKey}' for project ${projectId}`);
     }
 
+    // run handler if exists
+    const activityDef = await this.getActivityDefSafe(activityKey, await this.getProjectVersion(projectId));
+
+    if (activityDef && activityDef.handler) {
+      this.runHandler(projectId, activityKey, activity.id, await this.getProjectVersion(projectId), activityDef.handler, opts?.output ? JSON.stringify(opts.output) : null);
+    }
+
     await this.db.run(
       `UPDATE project_activity
        SET status = 'completed', decisionOutcome = ?, completedAt = datetime('now'), output = ?
@@ -114,12 +121,6 @@ export class WorkflowEngine {
     }
 
     await this.syncProjectActivity(projectId);
-
-    const versionId = await this.getProjectVersion(projectId);
-    const activityDef = await this.db.get<{ label: string }>(
-      'SELECT label FROM activity_definition WHERE activityKey = ? AND versionId = ?',
-      [activityKey, versionId]
-    );
 
     // Single canonical publish — no route should call publishWorkflowEvent separately
     publishWorkflowEvent({

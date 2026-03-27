@@ -27,7 +27,7 @@ router.post('/start', async (req: Request, res: Response) => {
     return;
   }
 
-  const firstActivity = 'pqr_created'; //after 'start'
+  const firstActivity = 'step1'; //after 'start' -> PQR Created
   const versionId = getActiveVersionId();
   if (!isValidActivity(activity, versionId)) {
     res.status(400).json({ error: `Invalid activity: '${activity}'` });
@@ -73,8 +73,8 @@ router.post('/submit/:accountNumber', async (req: Request, res: Response) => {
     return;
   }
 
-  const activityName = 'pqr_submitted';
-  console.log('[salesforce] received data:', JSON.stringify(payload));
+  const activityName = 'step2'; //PQR Submitted
+  // console.log('[salesforce] received data:', JSON.stringify(payload));
   const project = db
     .prepare('SELECT * FROM project WHERE accountNumber = ?')
     .get(accountNumber) as { id: number } | undefined;

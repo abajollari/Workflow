@@ -83,13 +83,17 @@ function buildEdgePath(
       <div class="graph-header">
         <div class="graph-header-left">
           <div class="top-badges">
-            <span class="chip">{{ nodes.length }} activities</span>
-            <span class="chip">{{ loopCount }} loops</span>
-     
-            Current Activity:
-            <span class="highlight">{{ activeNodeLabel }}</span>
+    
+            <span class="dim">Current Activity:</span>
+            <span class="chip">{{ activeNodeLabel }}</span>
             
-            <span class="dim">({{ completedNodes.size }} of {{ nodes.length }} completed)</span>
+            <span class="dim">
+              (            
+              {{ nodes.length }} activities;
+              {{ loopCount }} loops;
+              {{ completedNodes.size }} of {{ nodes.length }} completed
+              )
+            </span>
           </div>
         </div>
 
@@ -127,7 +131,7 @@ function buildEdgePath(
           <svg width="24" height="20" viewBox="0 0 24 20">
             <circle *ngIf="item.shape === 'circle'" cx="12" cy="10" r="7" fill="none" [attr.stroke]="item.color" stroke-width="1.5" />
             <rect *ngIf="item.shape === 'rect'" x="3" y="3" width="18" height="14" rx="3" fill="none" [attr.stroke]="item.color" stroke-width="1.5" />
-            <rect *ngIf="item.shape === 'diamond'" x="3" y="3" width="18" height="14" rx="3" fill="none" [attr.stroke]="item.color" stroke-width="1.5" stroke-dasharray="4 2" />
+            <polygon *ngIf="item.shape === 'diamond'" points="12,1 22,10 12,19 2,10" fill="none" [attr.stroke]="item.color" stroke-width="1.5" stroke-dasharray="4 2" />
             <rect *ngIf="item.shape === 'pill'" x="3" y="3" width="18" height="14" rx="7" fill="none" [attr.stroke]="item.color" stroke-width="1.5" />
             <polygon *ngIf="item.shape === 'hex'" points="12,1 22,6 22,14 12,19 2,14 2,6" fill="none" [attr.stroke]="item.color" stroke-width="1.5" />
             <line *ngIf="item.shape === 'line'" x1="2" y1="10" x2="22" y2="10" [attr.stroke]="item.color" stroke-width="1.5" stroke-dasharray="4 3" />
@@ -155,8 +159,8 @@ function buildEdgePath(
       >
         <svg
           #svgEl
-          width="100%"
-          height="100%"
+          [attr.width]="svgW * zoom"
+          [attr.height]="svgH * zoom"
           [attr.viewBox]="viewBoxStr"
           [style.cursor]="isPanning ? 'grabbing' : 'grab'"
         >
@@ -264,14 +268,10 @@ function buildEdgePath(
                 [attr.opacity]="nd.visible ? 1 : 0.5"
               />
 
-              <!-- Shape: Decision (dashed rect) -->
-              <rect
+              <!-- Shape: Decision (rhombus) -->
+              <polygon
                 *ngIf="node.type === 'decision'"
-                [attr.x]="nd.cx - nodeW / 2 - 4"
-                [attr.y]="nd.cy - nodeH / 2 + 2"
-                [attr.width]="nodeW + 8"
-                [attr.height]="nodeH - 4"
-                rx="6"
+                [attr.points]="nd.rhombusPoints"
                 [attr.fill]="nd.colors.bg"
                 [attr.stroke]="nd.colors.border"
                 [attr.stroke-width]="nd.isActive ? 2.5 : 1.5"
@@ -420,12 +420,12 @@ function buildEdgePath(
 
     .chip {
       font-family: var(--font-mono);
-      font-size: 10px;
+      font-size: 12px;
       color: black;
       background: rgb(246, 246, 247);
       border: 1px solid rgba(100, 116, 139, 0.15);
-      padding: 3px 10px;
-      border-radius: 14px;
+      padding: 3px 8px;
+      border-radius: 5px;
     }
 
     .graph-title {
@@ -528,7 +528,7 @@ function buildEdgePath(
     .legend-label {
       font-size: 11px;
       font-family: var(--font-mono);
-      letter-spacing: 0.3px;
+      letter-spacing: 0px;
     }
 
     /* Canvas */
@@ -536,7 +536,7 @@ function buildEdgePath(
       background: var(--bg-surface);
       border: 1px solid var(--border-subtle);
       border-radius: 16px;
-      overflow: hidden;
+      overflow: auto;
       height: 360px;
       position: relative;
     }
@@ -737,8 +737,7 @@ export class WorkflowGraphComponent implements OnInit, OnDestroy {
   }
 
   get viewBoxStr(): string {
-    if (!this.vb) return `0 0 ${this.svgW} ${this.svgH}`;
-    return `${this.vb.x} ${this.vb.y} ${this.vb.w} ${this.vb.h}`;
+    return `0 0 ${this.svgW} ${this.svgH}`;
   }
 
   /* ── Recalc ── */
@@ -792,6 +791,7 @@ export class WorkflowGraphComponent implements OnInit, OnDestroy {
   getNodeData(node: WorkflowNode) {
     const center = getNodeCenter(node);
     const isActive = node.id === this.activeNodeId;
+    const isSelected = node.id === this.selectedNodeId;
     const isCompleted = this.completedNodes.has(node.id);
     const isOnPath = this.onPathNodes.has(node.id);
 
@@ -800,6 +800,8 @@ export class WorkflowGraphComponent implements OnInit, OnDestroy {
       colors = { border: '#38bdf8', bg: '#0c2d4a', glow: 'rgba(56,189,248,0.5)' };
     } else if (isCompleted) {
       colors = { border: '#10b981', bg: '#052e1c', glow: 'rgba(16,185,129,0.25)' };
+    } else if (isSelected) {
+      colors = { ...colors, border: '#7dd3fc' };
     }
 
     const textColor = isActive ? '#e0f2fe' : isCompleted ? '#a7f3d0' : isOnPath ? '#cbd5e1' : '#64748b';
@@ -807,6 +809,7 @@ export class WorkflowGraphComponent implements OnInit, OnDestroy {
     const cx = center.x;
     const cy = center.y;
     const hexPoints = `${cx},${cy - 30} ${cx + 48},${cy - 12} ${cx + 48},${cy + 12} ${cx},${cy + 30} ${cx - 48},${cy + 12} ${cx - 48},${cy - 12}`;
+    const rhombusPoints = `${cx},${cy - 34} ${cx + 58},${cy} ${cx},${cy + 34} ${cx - 58},${cy}`;
 
     return {
       cx,
@@ -814,6 +817,7 @@ export class WorkflowGraphComponent implements OnInit, OnDestroy {
       colors,
       textColor,
       hexPoints,
+      rhombusPoints,
       isActive,
       isCompleted,
       visible: isOnPath || isActive || isCompleted,

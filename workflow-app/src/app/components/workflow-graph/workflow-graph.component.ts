@@ -28,12 +28,13 @@ const CELL_W = 140;
 const CELL_H = 120;
 const NODE_W = 100;
 const NODE_H = 56;
-const PAD = 80;
+const PAD_X = 30;
+const PAD_Y = 80;
 
 function getNodeCenter(node: WorkflowNode): Point {
   return {
-    x: PAD + node.col * CELL_W + NODE_W / 2,
-    y: PAD + node.row * CELL_H + NODE_H / 2,
+    x: PAD_X + node.col * CELL_W + NODE_W / 2,
+    y: PAD_Y + node.row * CELL_H + NODE_H / 2,
   };
 }
 
@@ -67,10 +68,14 @@ function buildEdgePath(
     return `M${a.x + NODE_W / 2},${a.y} C${a.x + NODE_W / 2 + dx * 0.3},${a.y} ${b.x - NODE_W / 2 - dx * 0.3},${b.y} ${b.x - NODE_W / 2},${b.y}`;
   }
 
-  const midX = (a.x + b.x) / 2;
-  const startX = a.x + (b.x > a.x ? NODE_W / 2 : -NODE_W / 2);
-  const endX = b.x + (a.x > b.x ? NODE_W / 2 : -NODE_W / 2);
-  return `M${startX},${a.y} C${midX},${a.y} ${midX},${b.y} ${endX},${b.y}`;
+  // Different rows: connect bottom→top (or top→bottom)
+  const goingDown = toNode.row > fromNode.row;
+  const startY = goingDown ? a.y + NODE_H / 2 : a.y - NODE_H / 2;
+  const endY   = goingDown ? b.y - NODE_H / 2 : b.y + NODE_H / 2;
+  const cpOffset = Math.max(30, Math.abs(b.y - a.y) * 0.45);
+  const cp1Y = goingDown ? startY + cpOffset : startY - cpOffset;
+  const cp2Y = goingDown ? endY   - cpOffset : endY   + cpOffset;
+  return `M${a.x},${startY} C${a.x},${cp1Y} ${b.x},${cp2Y} ${b.x},${endY}`;
 }
 
 @Component({
@@ -376,10 +381,10 @@ function buildEdgePath(
   styles: [`
     .graph-container {
       width: 100%;
-      max-width: 1200px;
-      margin: 0 auto;
       animation: fadeIn 0.5s ease both;
     }
+/*     max-width: 1200px;
+    margin: 0 auto; */
 
     @keyframes fadeIn {
       from { opacity: 0; transform: translateY(8px); }
@@ -744,8 +749,8 @@ export class WorkflowGraphComponent implements OnInit, OnDestroy {
   private recalcLayout(): void {
     const maxCol = Math.max(...this.nodes.map((n) => n.col));
     const maxRow = Math.max(...this.nodes.map((n) => n.row));
-    this.svgW = PAD * 2 + maxCol * CELL_W + NODE_W;
-    this.svgH = PAD * 2 + maxRow * CELL_H + NODE_H;
+    this.svgW = PAD_X * 2 + maxCol * CELL_W + NODE_W;
+    this.svgH = PAD_Y * 2 + maxRow * CELL_H + NODE_H;
     this.vb = { x: 0, y: 0, w: this.svgW, h: this.svgH };
   }
 

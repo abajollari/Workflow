@@ -153,11 +153,11 @@ export function initDb(): void {
 
     db.exec(`
       INSERT INTO team (name, description) VALUES
-        ('Analysis',    'Requirements gathering and analysis'),
-        ('Design',      'UX and system design'),
-        ('Engineering', 'Frontend and backend development'),
-        ('QA',          'Testing and quality assurance'),
-        ('DevOps',      'Deployment and infrastructure');
+        ('Sales_User', 'Sales User'),
+        ('Account_Manager', 'Account Manager'),
+        ('Pricing_Analyst', 'Pricing Analyst'),
+        ('Pricing_Support', 'Pricing Support'),
+        ('Administrator', 'Administrator');
     `);
 
     db.exec(`
@@ -284,7 +284,7 @@ export function initDb(): void {
     // Workflow 2.0
     db.exec(`
       INSERT INTO workflow_version (name, description, isActive)
-        VALUES ('2.0', 'Arian workflow', 1);
+        VALUES ('2.0', 'Arian workflow', 0);
     `);
 
     db.exec(`
@@ -337,53 +337,57 @@ export function initDb(): void {
     // 'writeToExcel' handler
     db.exec(`
       INSERT INTO activity_definition (activityKey, versionId, label, nodeType, col, row, teamId, actionType, handler, inputSchema) VALUES
-        ('start',3,'Start','start',0,0,NULL,'gate',NULL,NULL),
-        ('step1',3,'step1','task',1,0,1,'gate',NULL,NULL),
-        ('step2',3,'step2','task',2,0,1,'gate',NULL,NULL),
-        ('step3',3,'step3','task',3,0,1,'manual',NULL,NULL),
-        ('step4',3,'step4','decision',4,0,1,'approval',NULL,NULL),
-        ('step5',3,'step5','task',5,0,1,'automated',NULL,NULL),
-        ('step6',3,'step6','task',6,0,1,'gate',NULL,NULL),
-        ('step7',3,'step7','task',7,0,1,'gate',NULL,NULL),
-        ('step8',3,'step8','task',8,0,1,'gate',NULL,NULL),
-        ('step9',3,'step9','task',9,0,1,'gate',NULL,NULL),
-        ('step10',3,'step10','task',10,0,1,'gate',NULL,NULL),
-        ('step11',3,'step11','task',11,0,1,'gate',NULL,NULL),
-        ('step12',3,'step12','task',12,0,1,'gate',NULL,NULL),
-        ('step13',3,'step13','task',13,0,1,'gate',NULL,NULL),
-        ('step14',3,'step14','task',14,0,1,'gate',NULL,NULL),
-        ('step15',3,'step15','task',15,0,1,'gate',NULL,NULL),
-        ('step16',3,'step16','task',16,0,1,'gate',NULL,NULL),
-        ('step17',3,'step17','task',17,0,1,'gate',NULL,NULL),
-        ('step18',3,'step18','task',18,0,1,'gate',NULL,NULL),
-        ('step19',3,'step19','task',19,0,1,'gate',NULL,NULL),
-        ('step20',3,'step20','task',20,0,1,'gate',NULL,NULL),
-        ('end',3,'Done','end',21,0,NULL,'gate',NULL,NULL);
+        ('start',3,'Start','start',0,0, 1,'gate',NULL,NULL),
+        ('step1',3,'PQR Created','task',1,0, 1,'gate',NULL,NULL),
+        ('step2',3,'PQR Submitted','task',2,0, 1,'gate',NULL,NULL),
+        ('step3',3,'PQR Approved?','decision',3,0, 1,'approval',NULL,NULL),
+        ('step4',3,'PQR Assigned','task',4,0, 1,'gate',NULL,NULL),
+        ('step5',3,'Pre-Bid Created','task',4,1, 1,'gate',NULL,NULL),
+        ('step6',3,'Run Analyzer','task',5,1, 1,'gate',NULL,NULL),
+        ('step7',3,'PQA Created','task',6,1, 1,'gate',NULL,NULL),
+        ('step8',3,'PQA Submitted','task',7,1, 1,'gate',NULL,NULL),
+        ('step9',3,'PQA Received (sales)','task',7,0, 1,'gate',NULL,NULL),
+        ('step10',3,'Sales/Customer Approved?','decision',8,0, 1,'approval',NULL,NULL),
+        ('step11',3,'Draft Contract','task',9,0, 1,'gate',NULL,NULL),
+        ('step12',3,'Legal Review?','decision',9,1, 1,'approval',NULL,NULL),
+        ('step13',3,'Sales Receives Draft','task',10,1, 1,'gate',NULL,NULL),
+        ('step14',3,'Sales Approves Draft?','decision',11,1, 1,'approval',NULL,NULL),
+        ('step15',3,'Create Contract','task',12,1, 1,'gate',NULL,NULL),
+        ('step16',3,'Submit Contract','task',12,0, 1,'gate',NULL,NULL),
+        ('step17',3,'Customer Signed','task',13,0, 1,'gate',NULL,NULL),
+        ('step18',3,'Sales Signed','task',14,0, 1,'gate',NULL,NULL),
+        ('step19',3,'Create IAS Bid','task',15,0, 1,'gate',NULL,NULL),
+        ('step20',3,'Accept Bid','task',16,0, 1,'gate',NULL,NULL),
+        ('end',3,'Done','end',17,0, 1,'gate',NULL,NULL);
     `);
 
     db.exec(`
       INSERT INTO activity_transition (fromActivityId, toActivityId, condition, edgeType)
       SELECT (SELECT id FROM activity_definition WHERE activityKey='start' AND versionId=3),(SELECT id FROM activity_definition WHERE activityKey='step1' AND versionId=3), NULL, 'normal' UNION ALL
-      SELECT (SELECT id FROM activity_definition WHERE activityKey='step1' AND versionId=3),(SELECT id FROM activity_definition WHERE activityKey='step2' AND versionId=3), NULL, 'normal' UNION ALL
-      SELECT (SELECT id FROM activity_definition WHERE activityKey='step2' AND versionId=3),(SELECT id FROM activity_definition WHERE activityKey='step3' AND versionId=3), NULL, 'normal' UNION ALL
-      SELECT (SELECT id FROM activity_definition WHERE activityKey='step3' AND versionId=3),(SELECT id FROM activity_definition WHERE activityKey='step4' AND versionId=3), NULL, 'normal' UNION ALL
-      SELECT (SELECT id FROM activity_definition WHERE activityKey='step4' AND versionId=3),(SELECT id FROM activity_definition WHERE activityKey='step5' AND versionId=3), NULL, 'normal' UNION ALL
-      SELECT (SELECT id FROM activity_definition WHERE activityKey='step5' AND versionId=3),(SELECT id FROM activity_definition WHERE activityKey='step6' AND versionId=3), NULL, 'normal' UNION ALL
-      SELECT (SELECT id FROM activity_definition WHERE activityKey='step6' AND versionId=3),(SELECT id FROM activity_definition WHERE activityKey='step7' AND versionId=3), NULL, 'normal' UNION ALL
-      SELECT (SELECT id FROM activity_definition WHERE activityKey='step7' AND versionId=3),(SELECT id FROM activity_definition WHERE activityKey='step8' AND versionId=3), NULL, 'normal' UNION ALL
-      SELECT (SELECT id FROM activity_definition WHERE activityKey='step8' AND versionId=3),(SELECT id FROM activity_definition WHERE activityKey='step9' AND versionId=3), NULL, 'normal' UNION ALL
-      SELECT (SELECT id FROM activity_definition WHERE activityKey='step9' AND versionId=3),(SELECT id FROM activity_definition WHERE activityKey='step10' AND versionId=3), NULL, 'normal' UNION ALL
-      SELECT (SELECT id FROM activity_definition WHERE activityKey='step10' AND versionId=3),(SELECT id FROM activity_definition WHERE activityKey='step11' AND versionId=3), NULL, 'normal' UNION ALL
-      SELECT (SELECT id FROM activity_definition WHERE activityKey='step11' AND versionId=3),(SELECT id FROM activity_definition WHERE activityKey='step12' AND versionId=3), NULL, 'normal' UNION ALL
-      SELECT (SELECT id FROM activity_definition WHERE activityKey='step12' AND versionId=3),(SELECT id FROM activity_definition WHERE activityKey='step13' AND versionId=3), NULL, 'normal' UNION ALL
-      SELECT (SELECT id FROM activity_definition WHERE activityKey='step13' AND versionId=3),(SELECT id FROM activity_definition WHERE activityKey='step14' AND versionId=3), NULL, 'normal' UNION ALL
-      SELECT (SELECT id FROM activity_definition WHERE activityKey='step14' AND versionId=3),(SELECT id FROM activity_definition WHERE activityKey='step15' AND versionId=3), NULL, 'normal' UNION ALL
-      SELECT (SELECT id FROM activity_definition WHERE activityKey='step15' AND versionId=3),(SELECT id FROM activity_definition WHERE activityKey='step16' AND versionId=3), NULL, 'normal' UNION ALL
-      SELECT (SELECT id FROM activity_definition WHERE activityKey='step16' AND versionId=3),(SELECT id FROM activity_definition WHERE activityKey='step17' AND versionId=3), NULL, 'normal' UNION ALL
-      SELECT (SELECT id FROM activity_definition WHERE activityKey='step17' AND versionId=3),(SELECT id FROM activity_definition WHERE activityKey='step18' AND versionId=3), NULL, 'normal' UNION ALL
-      SELECT (SELECT id FROM activity_definition WHERE activityKey='step18' AND versionId=3),(SELECT id FROM activity_definition WHERE activityKey='step19' AND versionId=3), NULL, 'normal' UNION ALL
-      SELECT (SELECT id FROM activity_definition WHERE activityKey='step19' AND versionId=3),(SELECT id FROM activity_definition WHERE activityKey='step20' AND versionId=3), NULL, 'normal' UNION ALL
-      SELECT (SELECT id FROM activity_definition WHERE activityKey='step20' AND versionId=3),(SELECT id FROM activity_definition WHERE activityKey='end' AND versionId=3), NULL, 'normal';
+SELECT (SELECT id FROM activity_definition WHERE activityKey='step1' AND versionId=3),(SELECT id FROM activity_definition WHERE activityKey='step2' AND versionId=3), NULL, 'normal' UNION ALL
+SELECT (SELECT id FROM activity_definition WHERE activityKey='step2' AND versionId=3),(SELECT id FROM activity_definition WHERE activityKey='step3' AND versionId=3), NULL, 'normal' UNION ALL
+SELECT (SELECT id FROM activity_definition WHERE activityKey='step3' AND versionId=3),(SELECT id FROM activity_definition WHERE activityKey='step4' AND versionId=3), 'yes', 'normal' UNION ALL
+SELECT (SELECT id FROM activity_definition WHERE activityKey='step3' AND versionId=3),(SELECT id FROM activity_definition WHERE activityKey='step2' AND versionId=3), 'no', 'loop' UNION ALL
+SELECT (SELECT id FROM activity_definition WHERE activityKey='step4' AND versionId=3),(SELECT id FROM activity_definition WHERE activityKey='step5' AND versionId=3), NULL, 'normal' UNION ALL
+SELECT (SELECT id FROM activity_definition WHERE activityKey='step5' AND versionId=3),(SELECT id FROM activity_definition WHERE activityKey='step6' AND versionId=3), NULL, 'normal' UNION ALL
+SELECT (SELECT id FROM activity_definition WHERE activityKey='step6' AND versionId=3),(SELECT id FROM activity_definition WHERE activityKey='step7' AND versionId=3), NULL, 'normal' UNION ALL
+SELECT (SELECT id FROM activity_definition WHERE activityKey='step7' AND versionId=3),(SELECT id FROM activity_definition WHERE activityKey='step8' AND versionId=3), NULL, 'normal' UNION ALL
+SELECT (SELECT id FROM activity_definition WHERE activityKey='step8' AND versionId=3),(SELECT id FROM activity_definition WHERE activityKey='step9' AND versionId=3), NULL, 'normal' UNION ALL
+SELECT (SELECT id FROM activity_definition WHERE activityKey='step9' AND versionId=3),(SELECT id FROM activity_definition WHERE activityKey='step10' AND versionId=3), NULL, 'normal' UNION ALL
+SELECT (SELECT id FROM activity_definition WHERE activityKey='step10' AND versionId=3),(SELECT id FROM activity_definition WHERE activityKey='step11' AND versionId=3), 'yes', 'normal' UNION ALL
+SELECT (SELECT id FROM activity_definition WHERE activityKey='step10' AND versionId=3),(SELECT id FROM activity_definition WHERE activityKey='step9' AND versionId=3), 'no', 'loop' UNION ALL
+SELECT (SELECT id FROM activity_definition WHERE activityKey='step11' AND versionId=3),(SELECT id FROM activity_definition WHERE activityKey='step12' AND versionId=3), NULL, 'normal' UNION ALL
+SELECT (SELECT id FROM activity_definition WHERE activityKey='step12' AND versionId=3),(SELECT id FROM activity_definition WHERE activityKey='step13' AND versionId=3), 'yes', 'normal' UNION ALL
+SELECT (SELECT id FROM activity_definition WHERE activityKey='step12' AND versionId=3),(SELECT id FROM activity_definition WHERE activityKey='step11' AND versionId=3), 'no', 'loop' UNION ALL
+SELECT (SELECT id FROM activity_definition WHERE activityKey='step13' AND versionId=3),(SELECT id FROM activity_definition WHERE activityKey='step14' AND versionId=3), NULL, 'normal' UNION ALL
+SELECT (SELECT id FROM activity_definition WHERE activityKey='step14' AND versionId=3),(SELECT id FROM activity_definition WHERE activityKey='step15' AND versionId=3), 'yes', 'normal' UNION ALL
+SELECT (SELECT id FROM activity_definition WHERE activityKey='step14' AND versionId=3),(SELECT id FROM activity_definition WHERE activityKey='step13' AND versionId=3), 'no', 'loop' UNION ALL
+SELECT (SELECT id FROM activity_definition WHERE activityKey='step15' AND versionId=3),(SELECT id FROM activity_definition WHERE activityKey='step16' AND versionId=3), NULL, 'normal' UNION ALL
+SELECT (SELECT id FROM activity_definition WHERE activityKey='step16' AND versionId=3),(SELECT id FROM activity_definition WHERE activityKey='step17' AND versionId=3), NULL, 'normal' UNION ALL
+SELECT (SELECT id FROM activity_definition WHERE activityKey='step17' AND versionId=3),(SELECT id FROM activity_definition WHERE activityKey='step18' AND versionId=3), NULL, 'normal' UNION ALL
+SELECT (SELECT id FROM activity_definition WHERE activityKey='step18' AND versionId=3),(SELECT id FROM activity_definition WHERE activityKey='step19' AND versionId=3), NULL, 'normal' UNION ALL
+SELECT (SELECT id FROM activity_definition WHERE activityKey='step19' AND versionId=3),(SELECT id FROM activity_definition WHERE activityKey='step20' AND versionId=3), NULL, 'normal' UNION ALL
+SELECT (SELECT id FROM activity_definition WHERE activityKey='step20' AND versionId=3),(SELECT id FROM activity_definition WHERE activityKey='end' AND versionId=3), NULL, 'normal' ;
     `);
 
     const taskRows3: [string, string, string | null, number][] = [

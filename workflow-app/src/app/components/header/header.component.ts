@@ -1,7 +1,7 @@
-import { Component, OnInit } from '@angular/core';
+import { Component, OnInit, ChangeDetectorRef } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { Router, RouterLink, RouterLinkActive } from '@angular/router';
+import { Router } from '@angular/router';
 import { SelectedProjectService, Project } from '../../services/selected-project.service';
 import { NotificationService } from '../../services/notification.service';
 import { EngineApiService } from '../../services/engine-api.service';
@@ -9,7 +9,7 @@ import { EngineApiService } from '../../services/engine-api.service';
 @Component({
   selector: 'app-header',
   standalone: true,
-  imports: [CommonModule, FormsModule, RouterLink, RouterLinkActive],
+  imports: [CommonModule, FormsModule],
   // CommonModule includes DatePipe, AsyncPipe, NgIf, NgFor
   template: `
     <header class="header">
@@ -749,6 +749,7 @@ export class HeaderComponent implements OnInit {
     private selectedProject: SelectedProjectService,
     public router: Router,
     public notif: NotificationService,
+    private cdr: ChangeDetectorRef,
   ) {}
 
   toggleNotif(): void {
@@ -763,8 +764,8 @@ export class HeaderComponent implements OnInit {
   ngOnInit(): void {
     this.loading = true;
     this.engine.get<Project[]>('/api/projects').subscribe({
-      next: (data) => { this.projects = data; this.loading = false; },
-      error: () => { this.loading = false; },
+      next: (data) => { this.projects = data; this.loading = false; this.cdr.markForCheck(); },
+      error: () => { this.loading = false; this.cdr.markForCheck(); },
     });
   }
 

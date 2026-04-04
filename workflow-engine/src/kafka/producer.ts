@@ -1,5 +1,6 @@
 import kafka from './client.js';
 import type { WorkflowEvent } from './events.js';
+import { publishToTopic } from './kafkaHttp.js';
 
 const producer = kafka.producer();
 let connected = false;
@@ -18,4 +19,9 @@ export async function publishWorkflowEvent(event: WorkflowEvent): Promise<void> 
     messages: [{ value: JSON.stringify(event) }],
   });
   console.log(`[kafka] published ${event.type} for project ${event.projectId}, activated: [${event.activatedActivities.join(', ')}]`);
+}
+
+export async function publishWorkflowEventViaHttp(event: WorkflowEvent): Promise<void> {
+  await publishToTopic('activity-topic', [event]);
+  console.log(`[kafka-http] published ${event.type} for project ${event.projectId}, activated: [${event.activatedActivities.join(', ')}]`);
 }

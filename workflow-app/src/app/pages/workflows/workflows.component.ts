@@ -1,4 +1,4 @@
-import { Component, OnInit, inject } from '@angular/core';
+import { Component, OnInit, inject, ChangeDetectorRef } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Router } from '@angular/router';
 import { EngineApiService } from '../../services/engine-api.service';
@@ -299,6 +299,7 @@ interface WorkflowVersion {
 export class WorkflowsComponent implements OnInit {
   private engine = inject(EngineApiService);
   private router = inject(Router);
+  private cdr = inject(ChangeDetectorRef);
 
   versions: WorkflowVersion[] = [];
   loading = false;
@@ -311,8 +312,8 @@ export class WorkflowsComponent implements OnInit {
     this.loading = true;
     this.error = '';
     this.engine.get<WorkflowVersion[]>(`/api/workflow/versions`).subscribe({
-      next: (data) => { this.versions = data; this.loading = false; },
-      error: () => { this.error = 'Failed to load workflow versions.'; this.loading = false; },
+      next: (data) => { this.versions = data; this.loading = false; this.cdr.markForCheck(); },
+      error: () => { this.error = 'Failed to load workflow versions.'; this.loading = false; this.cdr.markForCheck(); },
     });
   }
 

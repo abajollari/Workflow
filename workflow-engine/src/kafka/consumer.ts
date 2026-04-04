@@ -1,6 +1,7 @@
 import kafka from './client.js';
 import { broadcastWorkflowEvent, type WorkflowEvent } from './events.js';
 import { redisPub } from '../redis/client.js';
+import { createConsumer, subscribeToTopics, consumeMessages } from './kafkaHttp.js';
 
 const admin = kafka.admin();
 const consumer = kafka.consumer({
@@ -22,6 +23,33 @@ async function ensureTopicExists(topic: string): Promise<void> {
 export async function stopWorkflowConsumer(): Promise<void> {
   await consumer.disconnect();
   console.log('[kafka] workflow consumer disconnected');
+}
+
+export async function startWorkflowConsumerViaHttp(pollIntervalMs = 1000): Promise<() => void> {
+  const { instanceUrl } = await createConsumer('workflow-engine-consumer-group', 'workflow-engine-consumer');
+  await subscribeToTopics(instanceUrl, ['workflow-events']);
+  console.log('[kafka-http] workflow consumer subscribed to workflow-events');
+
+  const interval = setInterval(async () => {
+    try {
+      const events = await consumeMessages<WorkflowEvent>(instanceUrl);
+      for (const event of events) {
+        console.log(`[kafka-http] consumed ${event.type} for project ${event.projectId}`);
+        if (redisPub) {
+          await redisPub.publish('workflow-events', JSON.stringify(event));
+        } else {
+          broadcastWorkflowEvent(event);
+        }
+      }
+    } catch (err) {
+      console.error('[kafka-http] failed to consume messages', err);
+    }
+  }, pollIntervalMs);
+
+  return () => {
+    clearInterval(interval);
+    console.log('[kafka-http] workflow consumer stopped');
+  };
 }
 
 export async function startWorkflowConsumer(): Promise<void> {

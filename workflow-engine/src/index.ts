@@ -14,7 +14,7 @@ import azureStorageRouter from './routes/azureStorage.js';
 import salesforceRouter from './routes/salesforce.js';
 import { initDb } from './db/initDb.js';
 import { registerAllHandlers } from './handlers/index.js';
-import { startWorkflowConsumer, stopWorkflowConsumer } from './kafka/consumer.js';
+import { startWorkflowConsumer, startWorkflowConsumerViaHttp, stopWorkflowConsumer } from './kafka/consumer.js';
 import { addWorkflowSseClient, removeWorkflowSseClient, addGlobalSseClient, removeGlobalSseClient, closeAllSseClients } from './kafka/events.js';
 
 const app = express();
@@ -22,7 +22,12 @@ const PORT = process.env.PORT ?? 3001;
 
 initDb();
 registerAllHandlers();
-startWorkflowConsumer().catch((err) => console.error('[kafka] workflow consumer failed to start:', err));
+const useKafkaHttp = process.env.KAFKA_USE_HTTP === 'true';
+if (useKafkaHttp) {
+  startWorkflowConsumerViaHttp().catch((err) => console.error('[kafka-http] workflow consumer failed to start:', err));
+} else {
+  startWorkflowConsumer().catch((err) => console.error('[kafka] workflow consumer failed to start:', err));
+}
 
 app.use(cors({
   origin: process.env.CORS_ORIGIN ?? 'http://localhost:4200',

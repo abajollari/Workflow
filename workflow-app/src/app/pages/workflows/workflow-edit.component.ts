@@ -1,4 +1,4 @@
-import { Component, OnInit, inject } from '@angular/core';
+import { Component, OnInit, inject, ChangeDetectorRef } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Router, ActivatedRoute } from '@angular/router';
@@ -581,6 +581,7 @@ export class WorkflowEditComponent implements OnInit {
   private engine  = inject(EngineApiService);
   private router  = inject(Router);
   private route   = inject(ActivatedRoute);
+  private cdr     = inject(ChangeDetectorRef);
 
   versionId!: number;
 
@@ -657,10 +658,12 @@ export class WorkflowEditComponent implements OnInit {
         }));
 
         this.loading = false;
+        this.cdr.markForCheck();
       },
       error: (err) => {
         this.loadError = err.error?.error ?? 'Failed to load workflow data.';
         this.loading = false;
+        this.cdr.markForCheck();
       },
     });
   }
@@ -751,6 +754,7 @@ export class WorkflowEditComponent implements OnInit {
       error: (err) => {
         this.stepError = err.error?.error ?? 'Failed to save workflow.';
         this.submitting = false;
+        this.cdr.markForCheck();
       },
     });
   }

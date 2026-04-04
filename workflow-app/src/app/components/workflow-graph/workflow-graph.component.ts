@@ -6,6 +6,7 @@ import {
   ElementRef,
   HostListener,
   effect,
+  ChangeDetectorRef,
 } from '@angular/core';
 import { Subscription } from 'rxjs';
 import { CommonModule } from '@angular/common';
@@ -664,6 +665,7 @@ export class WorkflowGraphComponent implements OnInit, OnDestroy {
     private router: Router,
     private engine: EngineApiService,
     private execution: WorkflowExecutionService,
+    private cdr: ChangeDetectorRef,
   ) {
     effect(() => {
       const project = selectedProject.selected();
@@ -689,10 +691,12 @@ export class WorkflowGraphComponent implements OnInit, OnDestroy {
         this.recalcLayout();
         this.updateCompletedNodes();
       }
+      this.cdr.markForCheck();
     });
     this.workflowData.edges$.subscribe((edges) => {
       this.edges = edges;
       if (edges.length > 0) this.updateCompletedNodes();
+      this.cdr.markForCheck();
     });
 
     // Live execution updates: when another client completes an activity, refresh

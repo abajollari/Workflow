@@ -7,6 +7,8 @@ export interface WorkflowEvent {
   activityId: string;
   activityLabel: string;
   activatedActivities: string[];
+  /** callbackToken-based URLs for each newly activated activity, keyed by activityId */
+  callbackUrls?: Record<string, string>;
   timestamp: string;
 }
 

@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto';
 import type { IDbAdapter } from '../db/IDbAdapter.js';
 import { SqliteAdapter } from '../db/SqliteAdapter.js';
 import db from '../db/database.js';
@@ -15,6 +16,7 @@ interface ProjectActivity {
   completedAt: string | null;
   input: string | null;
   output: string | null;
+  callbackToken: string | null;
   createdAt: string;
 }
 
@@ -122,6 +124,14 @@ export class WorkflowEngine {
 
     await this.syncProjectActivity(projectId);
 
+    const baseUrl = process.env['BASE_URL'] ?? `http://localhost:${process.env['PORT'] ?? 3001}`;
+    const callbackUrls: Record<string, string> = {};
+    for (const a of newActivities) {
+      if (a.callbackToken) {
+        callbackUrls[a.activityId] = `${baseUrl}/api/callback/${a.callbackToken}`;
+      }
+    }
+
     // Single canonical publish — no route should call publishWorkflowEvent separately
     publishWorkflowEvent({
       type: 'activity.completed',
@@ -129,6 +139,7 @@ export class WorkflowEngine {
       activityId: activityKey,
       activityLabel: activityDef?.label ?? activityKey,
       activatedActivities: newActivities.map((a) => a.activityId),
+      callbackUrls,
       timestamp: new Date().toISOString(),
     }).catch((err) => console.error('[engine] failed to publish workflow event:', err));
 
@@ -246,11 +257,12 @@ export class WorkflowEngine {
     );
 
     const iterationCount = lastCompleted?.maxIter != null ? lastCompleted.maxIter + 1 : 0;
+    const callbackToken = randomUUID();
 
     const result = await this.db.run(
-      `INSERT INTO project_activity (projectId, activityId, status, iterationCount, startedAt)
-       VALUES (?, ?, 'active', ?, datetime('now'))`,
-      [projectId, activityKey, iterationCount]
+      `INSERT INTO project_activity (projectId, activityId, status, iterationCount, startedAt, callbackToken)
+       VALUES (?, ?, 'active', ?, datetime('now'), ?)`,
+      [projectId, activityKey, iterationCount, callbackToken]
     );
 
     const projectActivityId = result.lastInsertRowid;

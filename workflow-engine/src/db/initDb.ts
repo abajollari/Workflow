@@ -431,5 +431,15 @@ SELECT (SELECT id FROM activity_definition WHERE activityKey='step20' AND versio
     `);
   })();
 
+  // Migrations — run on every startup regardless of whether the DB was just created
+  const hasCallbackToken = (db.prepare(
+    `SELECT COUNT(*) AS count FROM pragma_table_info('project_activity') WHERE name = 'callbackToken'`
+  ).get() as { count: number }).count;
+
+  if (!hasCallbackToken) {
+    db.exec(`ALTER TABLE project_activity ADD COLUMN callbackToken TEXT`);
+    console.log('[db] migration: added callbackToken to project_activity');
+  }
+
   console.log('[db] database initialised');
 }

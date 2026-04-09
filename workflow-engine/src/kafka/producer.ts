@@ -22,6 +22,6 @@ export async function publishWorkflowEvent(event: WorkflowEvent): Promise<void> 
 }
 
 export async function publishWorkflowEventViaHttp(event: WorkflowEvent): Promise<void> {
-  await publishToTopic('activity-topic', [event]);
+  await publishToTopic('workflow-events', [event]);
   console.log(`[kafka-http] published ${event.type} for project ${event.projectId}, activated: [${event.activatedActivities.join(', ')}]`);
 }

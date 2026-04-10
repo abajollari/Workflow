@@ -4,6 +4,7 @@ import { SqliteAdapter } from '../db/SqliteAdapter.js';
 import db from '../db/database.js';
 import { registry } from './ActivityHandlerRegistry.js';
 import { publishWorkflowEvent } from '../kafka/producer.js';
+import { notifyWebhooks, notifyEmailSubscribers } from '../services/notificationService.js';
 
 interface ProjectActivity {
   id: number;
@@ -288,6 +289,12 @@ export class WorkflowEngine {
       this.runHandler(projectId, activityKey, newActivity!.id, versionId, activityDef.handler, null);
     }
 
+    if (activityDef && callbackToken) {
+      const label = activityDef.label;
+      notifyWebhooks(projectId, activityKey, label, callbackToken);
+      notifyEmailSubscribers(projectId, activityKey, label, callbackToken);
+    }
+
     return newActivity!;
   }
 
@@ -422,9 +429,9 @@ export class WorkflowEngine {
   private async getActivityDefSafe(
     activityKey: string,
     versionId: number
-  ): Promise<{ id: number; actionType: string; handler: string | null; inputSchema: string | null } | undefined> {
-    return this.db.get<{ id: number; actionType: string; handler: string | null; inputSchema: string | null }>(
-      'SELECT id, actionType, handler, inputSchema FROM activity_definition WHERE activityKey = ? AND versionId = ?',
+  ): Promise<{ id: number; label: string; actionType: string; handler: string | null; inputSchema: string | null } | undefined> {
+    return this.db.get<{ id: number; label: string; actionType: string; handler: string | null; inputSchema: string | null }>(
+      'SELECT id, label, actionType, handler, inputSchema FROM activity_definition WHERE activityKey = ? AND versionId = ?',
       [activityKey, versionId]
     );
   }

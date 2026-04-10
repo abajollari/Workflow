@@ -1,0 +1,75 @@
+Option 1, 2 and 3 work for external apps which can support Kafka. Can you suggest options for external apps which cannot implement Kafka?                     
+  ⎿  ⧉ Selected 1 lines from workflow-app\src\app\components\workflow-graph\workflow-graph.component.ts in Visual Studio Code
+
+● The callback endpoint (POST /api/callback/:token) from Option 3 is already the answer for the completion side — that's plain HTTP. The gap for non-Kafka
+  systems is only on the notification side: how does the external system learn that an activity is waiting for it and receive the callback URL?
+
+  Three options, each fitting a different type of external system:
+
+  ---
+  Option A: Webhooks (push — best for automated external systems)
+
+  The engine POSTs to a URL the external system registers when an activity becomes active. The external system just exposes an HTTP endpoint.
+
+  What you'd build:
+  - A webhook_subscription table: { id, activityKey, url, secret }
+  - In activateActivity(), after inserting the row, look up any registered webhook for that activityKey and POST to it with the callback URL
+
+  POST https://external-system.com/workflow-hook
+  {
+    "event": "activity.activated",
+    "activityId": "review-document",
+    "projectId": 42,
+    "callbackUrl": "http://workflow-engine/api/callback/a1b2c3d4-...",
+    "timestamp": "..."
+  }
+
+  External system receives it, does its work, then POSTs to callbackUrl. Zero polling, no Kafka.
+
+  ---
+  Option B: Polling endpoint (pull — best for systems that can only make outbound requests)
+
+  Add a read-only endpoint external systems can poll on a schedule to find work waiting for them:
+
+  GET /api/activities/pending?activityKey=review-document&apiKey=<key>
+
+  Returns active activities with their callback URLs:
+  [
+    {
+      "projectId": 42,
+      "activityId": "review-document",
+      "callbackUrl": "http://workflow-engine/api/callback/a1b2c3d4-...",
+      "startedAt": "..."
+    }
+  ]
+
+  Simple to implement — a SQL query on project_activity filtered by activityId and status = 'active' that joins to get the callbackToken.
+
+  ---
+  Option C: Email / magic link (best for human approvers)
+
+  For approval-type activities where a person needs to act, the engine sends an email when the activity activates. The email contains a direct link (or two
+  buttons: Approve / Reject) that hits the callback endpoint.
+
+  https://workflow-engine/api/callback/a1b2c3d4-.../approve   → outcome=yes
+  https://workflow-engine/api/callback/a1b2c3d4-.../reject    → outcome=no
+
+  You'd add two convenience sub-routes on the callback router that set the outcome and return a simple HTML confirmation page instead of JSON.
+
+  ---
+  Which to pick
+
+  ┌────────────────────────────────────────────────────────┬────────────────┐
+  │                        Scenario                        │    Best fit    │
+  ├────────────────────────────────────────────────────────┼────────────────┤
+  │ Automated external service (RPA, integration platform) │ A — Webhooks   │
+  ├────────────────────────────────────────────────────────┼────────────────┤
+  │ Legacy system or cron job that can only poll           │ B — Polling    │
+  ├────────────────────────────────────────────────────────┼────────────────┤
+  │ Human approver who gets notified by email              │ C — Magic link │
+  └────────────────────────────────────────────────────────┴────────────────┘
+
+  A is the most common pattern and worth doing first. B is the easiest to implement (just one query). C extends Option 3's callback route with two extra paths
+  and an HTML response.
+
+  All three reuse the callbackToken mechanism already in place — no internal IDs are ever exposed.

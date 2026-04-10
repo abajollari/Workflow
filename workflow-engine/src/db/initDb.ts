@@ -441,5 +441,37 @@ SELECT (SELECT id FROM activity_definition WHERE activityKey='step20' AND versio
     console.log('[db] migration: added callbackToken to project_activity');
   }
 
+  const hasWebhookTable = db.prepare(
+    `SELECT name FROM sqlite_master WHERE type='table' AND name='webhook_subscription'`
+  ).get();
+  if (!hasWebhookTable) {
+    db.exec(`
+      CREATE TABLE webhook_subscription (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        activityKey TEXT    NOT NULL,
+        url         TEXT    NOT NULL,
+        secret      TEXT,
+        createdAt   TEXT    NOT NULL DEFAULT (datetime('now'))
+      )
+    `);
+    console.log('[db] migration: created webhook_subscription table');
+  }
+
+  const hasEmailTable = db.prepare(
+    `SELECT name FROM sqlite_master WHERE type='table' AND name='email_subscription'`
+  ).get();
+  if (!hasEmailTable) {
+    db.exec(`
+      CREATE TABLE email_subscription (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        activityKey TEXT    NOT NULL,
+        email       TEXT    NOT NULL,
+        name        TEXT,
+        createdAt   TEXT    NOT NULL DEFAULT (datetime('now'))
+      )
+    `);
+    console.log('[db] migration: created email_subscription table');
+  }
+
   console.log('[db] database initialised');
 }

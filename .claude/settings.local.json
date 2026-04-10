@@ -5,7 +5,8 @@
       "Bash(mkdir -p /c/Users/arian/source/repos/Workflow/workflow-app/docs)",
       "Bash(npm install:*)",
       "Bash(rm:*)",
-      "Bash(npm run:*)"
+      "Bash(npm run:*)",
+      "Bash(npx tsc:*)"
     ]
   }
 }
